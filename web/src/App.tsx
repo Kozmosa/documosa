@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { FormEvent, ReactNode } from 'react'
+import type { FormEvent } from 'react'
 import AceDiff from 'ace-diff'
 import * as ace from 'ace-builds'
 import 'ace-builds/src-noconflict/mode-markdown'
@@ -9,6 +9,51 @@ import { useTranslation } from 'react-i18next'
 import type { CherryInstance, CommentRange, EditorSelection } from './CherryEditor'
 import type { Locale } from './i18n'
 import './App.css'
+
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from '@/components/ui/toggle-group'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Card, CardContent } from '@/components/ui/card'
+import {
+  LogIn,
+  Menu,
+  Languages,
+  Upload,
+  Save,
+  Download,
+  History,
+  PanelRightClose,
+  PanelRightOpen,
+  X,
+  Filter,
+  ArrowLeftRight,
+  MessageSquarePlus,
+  RefreshCw,
+} from 'lucide-react'
 
 type RoleMode = 'reviewer' | 'writer'
 
@@ -366,7 +411,7 @@ function formatAuditEvent(event: AuditEvent, t: Translation, context: AuditForma
       }
       return {
         category,
-        title: t('history.events.linesDeleted', { count: detailNumber(details, 'count') ?? detailArray(details, 'line_ids').length }),
+        title: t('history.events.linesDeleted', { count: detailNumber(details, 'count') ?? detailArray(details, 'deleted_line_ids').length }),
         body: describeAuditLines(details, t, context, 'deleted'),
       }
     case 'comment.created':
@@ -434,33 +479,6 @@ function truncateAuditText(value: string) {
   return `${value.slice(0, AUDIT_COLLAPSE_LIMIT).trimEnd()}...`
 }
 
-
-function Icon({ name }: { name: string }) {
-  return <span className="material-symbols-outlined icon" aria-hidden="true">{name}</span>
-}
-
-function ButtonWithIcon({
-  icon,
-  children,
-  className,
-  ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { icon: string; children: ReactNode }) {
-  return (
-    <button {...props} className={["with-icon", className].filter(Boolean).join(' ')}>
-      <Icon name={icon} />
-      <span>{children}</span>
-    </button>
-  )
-}
-
-function IconButton({ icon, label, className, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { icon: string; label: string }) {
-  return (
-    <button {...props} className={["icon-button", className].filter(Boolean).join(' ')} aria-label={label} title={label}>
-      <Icon name={icon} />
-    </button>
-  )
-}
-
 function readableError(error: unknown) {
   if (!(error instanceof Error)) return String(error)
   try {
@@ -523,31 +541,24 @@ function HistoryDiffModal({
     return () => aceDiff.destroy()
   }, [diff])
 
-  useEffect(() => {
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', closeOnEscape)
-    return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [onClose])
-
   return (
-    <div className="history-diff-backdrop" role="dialog" aria-modal="true" aria-label={title}>
-      <section className="history-diff-modal">
-        <header>
-          <h3>{title}</h3>
-          <IconButton icon="close" label={closeLabel} onClick={onClose} />
-        </header>
-        <div className="history-diff-labels" aria-hidden="true">
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-[1120px] w-[96vw] max-h-[760px] h-[92vh] flex flex-col gap-3 p-5" aria-label={title}>
+        <DialogHeader className="flex flex-row items-center justify-between gap-3">
+          <DialogTitle className="text-lg">{title}</DialogTitle>
+          <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label={closeLabel}>
+            <X className="h-4 w-4" />
+          </Button>
+        </DialogHeader>
+        <div className="flex justify-between text-xs text-muted-foreground px-1">
           <span>{diff.from_event.event_type}</span>
           <span>{diff.to_event.event_type}</span>
         </div>
-        <div className="history-diff-view" ref={containerRef} />
-      </section>
-    </div>
+        <div className="history-diff-view flex-1 min-h-0" ref={containerRef} />
+      </DialogContent>
+    </Dialog>
   )
 }
-
 
 function lineIdIndex(lines: Line[]) {
   return new Map(lines.map((line, index) => [line.id, index]))
@@ -951,145 +962,176 @@ function App() {
 
   if (!identitySaved) {
     return (
-      <main className="identity-screen">
-        <form className="identity-panel" onSubmit={saveIdentity}>
-          <h1>{t('app.name')}</h1>
-          <input
-            autoFocus
-            value={identity.nickname}
-            onChange={(event) => setIdentity((current) => ({ ...current, nickname: event.target.value }))}
-            placeholder={t('identity.nicknamePlaceholder')}
-          />
-          <div className="segmented">
-            <button
-              type="button"
-              className={identity.roleMode === 'reviewer' ? 'active' : ''}
-              onClick={() => setIdentity((current) => ({ ...current, roleMode: 'reviewer' }))}
-            >
-              {t('role.reviewer')}
-            </button>
-            <button
-              type="button"
-              className={identity.roleMode === 'writer' ? 'active' : ''}
-              onClick={() => setIdentity((current) => ({ ...current, roleMode: 'writer' }))}
-            >
-              {t('role.writer')}
-            </button>
-          </div>
-          <ButtonWithIcon icon="login" className="primary" disabled={!identity.nickname.trim()}>
-            {t('identity.enter')}
-          </ButtonWithIcon>
-        </form>
+      <main className="identity-screen min-h-screen grid place-items-center bg-background">
+        <Card className="w-full max-w-md mx-auto">
+          <CardContent className="pt-6">
+            <form className="flex flex-col gap-4" onSubmit={saveIdentity}>
+              <h1 className="text-2xl font-semibold tracking-tight">{t('app.name')}</h1>
+              <Input
+                autoFocus
+                value={identity.nickname}
+                onChange={(event) => setIdentity((current) => ({ ...current, nickname: event.target.value }))}
+                placeholder={t('identity.nicknamePlaceholder')}
+              />
+              <ToggleGroup
+                type="single"
+                value={identity.roleMode}
+                onValueChange={(value) => {
+                  if (value) setIdentity((current) => ({ ...current, roleMode: value as RoleMode }))
+                }}
+                className="w-full"
+              >
+                <ToggleGroupItem value="reviewer" className="flex-1">{t('role.reviewer')}</ToggleGroupItem>
+                <ToggleGroupItem value="writer" className="flex-1">{t('role.writer')}</ToggleGroupItem>
+              </ToggleGroup>
+              <Button disabled={!identity.nickname.trim()}>
+                <LogIn className="h-4 w-4 mr-1.5" />
+                {t('identity.enter')}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
       </main>
     )
   }
 
   return (
     <main className={commentsOpen ? 'workspace' : 'workspace comments-collapsed'}>
-      <IconButton className="sidebar-toggle" icon="menu" label={t('docs.open')} onClick={() => setSidebarOpen(true)} />
-      <button
-        className={sidebarOpen ? 'sheet-backdrop docs-backdrop open' : 'sheet-backdrop docs-backdrop'}
-        aria-label={t('docs.close')}
-        aria-hidden={!sidebarOpen}
-        tabIndex={sidebarOpen ? 0 : -1}
-        onClick={() => setSidebarOpen(false)}
-      />
-      <aside className={sidebarOpen ? 'documents open' : 'documents'}>
-        <div className="brand">
-          <h1>{t('app.name')}</h1>
-          <span>{identity.nickname}</span>
-        </div>
-        <div className="segmented">
-          {(['reviewer', 'writer'] as RoleMode[]).map((mode) => (
-            <button
-              key={mode}
-              className={identity.roleMode === mode ? 'active' : ''}
-              onClick={() => {
-                localStorage.setItem('documosa.role_mode', mode)
-                setIdentity((current) => ({ ...current, roleMode: mode }))
-              }}
-            >
-              {t(`role.${mode}`)}
-            </button>
-          ))}
-        </div>
-        <section className="locale-switcher" aria-label={t('locale.label')}>
-          <span><Icon name="translate" /> {t('locale.label')}</span>
-          <div className="segmented compact">
-            <button className={locale === 'zh' ? 'active' : ''} onClick={() => changeLocale('zh')}>
-              {t('locale.chinese')}
-            </button>
-            <button className={locale === 'en' ? 'active' : ''} onClick={() => changeLocale('en')}>
-              {t('locale.english')}
-            </button>
-          </div>
-        </section>
-        <form className="create-doc" onSubmit={createDocument}>
-          <input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder={t('docs.titlePlaceholder')} />
-          <textarea
-            value={draftContent}
-            onChange={(event) => setDraftContent(event.target.value)}
-            placeholder={t('docs.contentPlaceholder')}
-          />
-          <ButtonWithIcon icon="upload_file" className="primary">
-            {t('docs.createImport')}
-          </ButtonWithIcon>
-        </form>
-        <div className="doc-list">
-          {documents.map((document) => (
-            <button
-              key={document.id}
-              className={snapshot?.document.id === document.id ? 'doc active' : 'doc'}
-              onClick={() => void selectDocument(document.id)}
-            >
-              <strong>{document.title}</strong>
-              <span>{formatDate(document.updated_at)}</span>
-            </button>
-          ))}
-        </div>
-      </aside>
+      <Button variant="ghost" size="icon" className="sidebar-toggle" onClick={() => setSidebarOpen(true)} aria-label={t('docs.open')}>
+        <Menu className="h-4 w-4" />
+      </Button>
 
-      <section className="editor">
-        <header className="toolbar">
-          <div>
-            <h2>{snapshot?.document.title ?? t('toolbar.noDocument')}</h2>
-            <span>
+      <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+        <SheetContent side="left" className="w-[300px] max-w-[calc(100vw-28px)] flex flex-col gap-4 overflow-auto">
+          <SheetHeader className="px-0">
+            <div className="flex items-baseline justify-between gap-3">
+              <SheetTitle className="text-xl font-semibold">{t('app.name')}</SheetTitle>
+              <span className="text-xs text-muted-foreground">{identity.nickname}</span>
+            </div>
+          </SheetHeader>
+
+          <ToggleGroup
+            type="single"
+            value={identity.roleMode}
+            onValueChange={(value) => {
+              if (!value) return
+              localStorage.setItem('documosa.role_mode', value)
+              setIdentity((current) => ({ ...current, roleMode: value as RoleMode }))
+            }}
+            className="w-full"
+          >
+            <ToggleGroupItem value="reviewer" className="flex-1">{t('role.reviewer')}</ToggleGroupItem>
+            <ToggleGroupItem value="writer" className="flex-1">{t('role.writer')}</ToggleGroupItem>
+          </ToggleGroup>
+
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Languages className="h-3.5 w-3.5" />
+            {t('locale.label')}
+          </div>
+          <ToggleGroup
+            type="single"
+            value={locale}
+            onValueChange={(value) => {
+              if (value) changeLocale(value as Locale)
+            }}
+            className="w-full"
+          >
+            <ToggleGroupItem value="zh" className="flex-1">{t('locale.chinese')}</ToggleGroupItem>
+            <ToggleGroupItem value="en" className="flex-1">{t('locale.english')}</ToggleGroupItem>
+          </ToggleGroup>
+
+          <form className="flex flex-col gap-2.5" onSubmit={createDocument}>
+            <Input
+              value={draftTitle}
+              onChange={(event) => setDraftTitle(event.target.value)}
+              placeholder={t('docs.titlePlaceholder')}
+            />
+            <Textarea
+              value={draftContent}
+              onChange={(event) => setDraftContent(event.target.value)}
+              placeholder={t('docs.contentPlaceholder')}
+              className="min-h-[82px]"
+            />
+            <Button>
+              <Upload className="h-4 w-4 mr-1.5" />
+              {t('docs.createImport')}
+            </Button>
+          </form>
+
+          <div className="flex flex-col gap-1.5">
+            {documents.map((document) => (
+              <Button
+                key={document.id}
+                variant={snapshot?.document.id === document.id ? 'secondary' : 'ghost'}
+                className="w-full justify-start flex-col items-start h-auto gap-0.5 py-2"
+                onClick={() => void selectDocument(document.id)}
+              >
+                <span className="font-medium text-sm">{document.title}</span>
+                <span className="text-xs text-muted-foreground">{formatDate(document.updated_at)}</span>
+              </Button>
+            ))}
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <section className="editor min-w-0 grid grid-rows-[auto_auto_1fr]">
+        <header className="flex items-center justify-between gap-4 px-5 py-4 min-h-[72px] bg-card border-b">
+          <div className="min-w-0">
+            <h2 className="text-xl font-semibold truncate">{snapshot?.document.title ?? t('toolbar.noDocument')}</h2>
+            <span className="text-xs text-muted-foreground">
               {snapshot
                 ? `${t('toolbar.lineCount', { count: activeLines.length })} · ${dirty ? t('toolbar.unsaved') : t('toolbar.saved')}`
                 : t('toolbar.openOrCreate')}
             </span>
           </div>
-          <div className="toolbar-actions">
-            <ButtonWithIcon icon="save" disabled={!snapshot || !dirty || identity.roleMode !== 'writer' || remoteConflict} onClick={() => void saveContent()}>
+          <div className="flex gap-2 flex-wrap">
+            <Button size="sm" disabled={!snapshot || !dirty || identity.roleMode !== 'writer' || remoteConflict} onClick={() => void saveContent()}>
+              <Save className="h-3.5 w-3.5 mr-1.5" />
               {t('toolbar.save')}
-            </ButtonWithIcon>
-            <ButtonWithIcon icon="download" disabled={!snapshot} onClick={() => void exportDocument()}>
+            </Button>
+            <Button size="sm" variant="outline" disabled={!snapshot} onClick={() => void exportDocument()}>
+              <Download className="h-3.5 w-3.5 mr-1.5" />
               {t('toolbar.export')}
-            </ButtonWithIcon>
-            <ButtonWithIcon icon="history" disabled={!snapshot} onClick={() => setHistoryOpen(true)}>
+            </Button>
+            <Button size="sm" variant="outline" disabled={!snapshot} onClick={() => setHistoryOpen(true)}>
+              <History className="h-3.5 w-3.5 mr-1.5" />
               {t('toolbar.history')}
-            </ButtonWithIcon>
-            <ButtonWithIcon
-              icon={commentsOpen ? 'right_panel_close' : 'right_panel_open'}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
               aria-controls="review-column"
               aria-expanded={commentsOpen}
               onClick={() => setCommentsOpen((open) => !open)}
             >
-              {commentsOpen ? t('review.hidePanel') : t('review.showPanel')}
-            </ButtonWithIcon>
+              {commentsOpen ? (
+                <>
+                  <PanelRightClose className="h-3.5 w-3.5 mr-1.5" />
+                  {t('review.hidePanel')}
+                </>
+              ) : (
+                <>
+                  <PanelRightOpen className="h-3.5 w-3.5 mr-1.5" />
+                  {t('review.showPanel')}
+                </>
+              )}
+            </Button>
           </div>
         </header>
+
         {remoteConflict ? (
-          <div className="conflict-bar">
-            {t('conflict.message')}
-            <ButtonWithIcon icon="refresh" disabled={!snapshot} onClick={() => snapshot && void refreshSnapshot(snapshot.document.id)}>
+          <Alert className="flex items-center justify-between gap-3 rounded-none border-x-0 border-t-0 border-amber-200 bg-amber-50 text-amber-900">
+            <AlertDescription>{t('conflict.message')}</AlertDescription>
+            <Button variant="outline" size="sm" disabled={!snapshot} onClick={() => snapshot && void refreshSnapshot(snapshot.document.id)}>
+              <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
               {t('conflict.refresh')}
-            </ButtonWithIcon>
-          </div>
+            </Button>
+          </Alert>
         ) : null}
-        <div className="editor-pane">
+
+        <div className="editor-pane min-h-0 p-4 pb-6 overflow-hidden">
           {snapshot ? (
-            <Suspense fallback={<div className="empty-state compact">{t('editor.loading')}</div>}>
+            <Suspense fallback={<div className="grid place-items-center h-full text-muted-foreground text-sm">{t('editor.loading')}</div>}>
               <CherryEditor
                 key={snapshot.document.id}
                 documentId={snapshot.document.id}
@@ -1107,222 +1149,255 @@ function App() {
               />
             </Suspense>
           ) : (
-            <div className="empty-state">{t('editor.empty')}</div>
+            <div className="grid place-items-center h-full text-muted-foreground text-sm">{t('editor.empty')}</div>
           )}
         </div>
       </section>
 
-      <aside id="review-column" className="review-column" aria-hidden={!commentsOpen} inert={!commentsOpen}>
-        <section className="selection-card">
-          <h3>{t('review.cursor')}</h3>
-          <p className="line-indicator">{t('review.line', { number: selectedLine ? selectedLineIndex + 1 : 0 })}</p>
-          <p>{selectedText || linePreview(selectedLine, t)}</p>
-          {snapshot && (dirty || remoteConflict) ? <span className="note">{t('review.saveOrRefresh')}</span> : null}
-          {snapshot && !selectedText && !dirty && !remoteConflict ? <span className="note">{t('review.selectText')}</span> : null}
-        </section>
-        <section>
-          <h3>{t('review.comments')}</h3>
-          <form onSubmit={createComment}>
-            <textarea value={commentBody} onChange={(event) => setCommentBody(event.target.value)} placeholder={t('review.commentPlaceholder')} />
-            <ButtonWithIcon icon="add_comment" disabled={annotationsDisabled || !commentBody.trim()}>
+      <aside
+        id="review-column"
+        className="min-h-screen min-w-0 flex flex-col gap-4 p-4 overflow-auto bg-card border-l"
+        style={{ opacity: commentsOpen ? 1 : 0, pointerEvents: commentsOpen ? 'auto' : 'none', transform: commentsOpen ? 'translateX(0)' : 'translateX(18px)', transition: 'opacity 220ms, transform 220ms' }}
+        aria-hidden={!commentsOpen}
+      >
+        <Card>
+          <CardContent className="pt-4 flex flex-col gap-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t('review.cursor')}</h3>
+            <p className="text-lg font-semibold">{t('review.line', { number: selectedLine ? selectedLineIndex + 1 : 0 })}</p>
+            <p className="text-sm whitespace-pre-wrap">{selectedText || linePreview(selectedLine, t)}</p>
+            {snapshot && (dirty || remoteConflict) ? (
+              <span className="text-xs text-muted-foreground">{t('review.saveOrRefresh')}</span>
+            ) : null}
+            {snapshot && !selectedText && !dirty && !remoteConflict ? (
+              <span className="text-xs text-muted-foreground">{t('review.selectText')}</span>
+            ) : null}
+          </CardContent>
+        </Card>
+
+        <div className="flex flex-col gap-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t('review.comments')}</h3>
+          <form className="flex flex-col gap-2" onSubmit={createComment}>
+            <Textarea
+              value={commentBody}
+              onChange={(event) => setCommentBody(event.target.value)}
+              placeholder={t('review.commentPlaceholder')}
+              className="min-h-[82px]"
+            />
+            <Button disabled={annotationsDisabled || !commentBody.trim()}>
+              <MessageSquarePlus className="h-4 w-4 mr-1.5" />
               {t('review.comment')}
-            </ButtonWithIcon>
+            </Button>
           </form>
+
           {snapshot?.comments.map((comment) => (
-            <article
+            <Card
               key={comment.id}
               id={`comment-${comment.id}`}
               className={[
-                comment.resolved ? 'muted item' : 'item',
-                activeCommentId === comment.id ? 'active-comment' : '',
+                'cursor-pointer',
+                comment.resolved ? 'opacity-60' : '',
+                activeCommentId === comment.id ? 'ring-2 ring-primary/20 border-primary' : '',
                 flashingCommentId === comment.id ? 'flash-comment' : '',
-              ]
-                .filter(Boolean)
-                .join(' ')}
+              ].filter(Boolean).join(' ')}
               onClick={() => setActiveCommentId(comment.id)}
             >
-              <strong>{comment.author_nickname}</strong>
-              <p>{comment.body}</p>
-              {snapshot.replies
-                .filter((reply) => reply.comment_id === comment.id)
-                .map((reply) => (
-                  <p className="reply" key={reply.id}>
-                    {reply.author_nickname}: {reply.body}
-                  </p>
-                ))}
-            </article>
+              <CardContent className="pt-4 flex flex-col gap-1.5">
+                <strong className="text-sm">{comment.author_nickname}</strong>
+                <p className="text-sm whitespace-pre-wrap">{comment.body}</p>
+                {snapshot.replies
+                  .filter((reply) => reply.comment_id === comment.id)
+                  .map((reply) => (
+                    <p className="text-sm border-l-2 pl-3 text-muted-foreground" key={reply.id}>
+                      {reply.author_nickname}: {reply.body}
+                    </p>
+                  ))}
+              </CardContent>
+            </Card>
           ))}
-        </section>
-        {status ? <p className="status">{status}</p> : null}
+        </div>
+
+        {status ? <p className="text-sm text-primary">{status}</p> : null}
       </aside>
 
-      {historyOpen ? (
-        <div className="history-drawer" role="dialog" aria-label={t('history.title')}>
-          <button className="sheet-backdrop" aria-label={t('history.closeLabel')} onClick={closeHistoryDrawer} />
-          <section className="history-panel">
-            <div className="history-sticky">
-              <header>
-                <h3>{t('history.title')}</h3>
-                <IconButton icon="close" label={t('history.close')} onClick={closeHistoryDrawer} />
-              </header>
-              <section className="history-filters">
-                <div className="history-actions">
-                  <button
-                    type="button"
-                    className="history-filter-toggle"
-                    aria-expanded={historyFiltersOpen}
-                    onClick={() => setHistoryFiltersOpen((open) => !open)}
-                  >
-                    <Icon name="filter_list" />
-                    <span>{t('history.filters')}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={historyDiffMode ? 'history-diff-toggle active' : 'history-diff-toggle'}
-                    onClick={() => {
-                      if (historyDiffMode) {
-                        cancelHistoryDiff()
-                      } else {
-                        setHistoryDiffMode(true)
-                        setHistoryDiffFromId(null)
-                        setHistoryDiffError('')
-                      }
-                    }}
-                  >
-                    <Icon name={historyDiffMode ? 'close' : 'compare_arrows'} />
-                    <span>{historyDiffMode ? t('history.diff.cancel') : t('history.diff.button')}</span>
-                  </button>
-                </div>
-                <div
-                  className={historyFiltersOpen ? 'history-filter-fields open' : 'history-filter-fields'}
-                  aria-hidden={!historyFiltersOpen}
-                  inert={!historyFiltersOpen}
-                >
-                  <label>
-                    <span>{t('history.category')}</span>
-                    <select value={historyCategory} onChange={(event) => setHistoryCategory(event.target.value as AuditCategory)}>
-                      {AUDIT_CATEGORIES.map((category) => (
-                        <option key={category} value={category}>
-                          {t(`history.categories.${category}`)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    <span>{t('history.from')}</span>
-                    <input type="datetime-local" value={historyFrom} onChange={(event) => setHistoryFrom(event.target.value)} />
-                  </label>
-                  <label>
-                    <span>{t('history.to')}</span>
-                    <input type="datetime-local" value={historyTo} onChange={(event) => setHistoryTo(event.target.value)} />
-                  </label>
-                  <button type="button" onClick={clearHistoryFilters}>
-                    {t('history.clearFilters')}
-                  </button>
-                </div>
-              </section>
-              {historyDiffMode ? (
-                <p className={historyDiffError ? 'history-diff-status error' : 'history-diff-status'}>
-                  {historyDiffError ||
-                    (historyDiffLoading
-                      ? t('history.diff.loading')
-                      : historyDiffFromId
-                        ? t('history.diff.pickEnd')
-                        : t('history.diff.pickStart'))}
-                </p>
-              ) : null}
+      <Sheet open={historyOpen} onOpenChange={(open) => { if (!open) closeHistoryDrawer() }}>
+        <SheetContent side="right" className="w-[420px] max-w-full flex flex-col gap-3 overflow-auto">
+          <SheetHeader className="px-0 pb-0">
+            <div className="flex items-center justify-between gap-3">
+              <SheetTitle className="text-base font-medium">{t('history.title')}</SheetTitle>
+              <Button variant="ghost" size="icon-sm" onClick={closeHistoryDrawer} aria-label={t('history.close')}>
+                <X className="h-4 w-4" />
+              </Button>
             </div>
-            {filteredAuditEvents.length === 0 ? <p className="empty-state compact">{t('history.empty')}</p> : null}
-            {filteredAuditEvents.map((event) => {
-              const formatted = formatAuditEvent(event, t, auditFormatContext)
-              const expanded = expandedAuditIds.has(event.id)
-              const expandable = formatted.body.length > AUDIT_COLLAPSE_LIMIT
-              const body = expandable && !expanded ? truncateAuditText(formatted.body) : formatted.body
-              const diffSelected = historyDiffFromId === event.id
-              return (
-                <article
-                  key={event.id}
-                  data-audit-id={event.id}
-                  className={['audit-row', historyDiffMode ? 'diff-mode' : '', diffSelected ? 'diff-selected' : ''].filter(Boolean).join(' ')}
-                  tabIndex={0}
-                  onClick={() => {
+          </SheetHeader>
+
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-2">
+              <Button variant="ghost" size="sm" className="gap-1" onClick={() => setHistoryFiltersOpen((open) => !open)}>
+                <Filter className="h-3.5 w-3.5" />
+                {t('history.filters')}
+              </Button>
+              <Button
+                variant={historyDiffMode ? 'default' : 'outline'}
+                size="sm"
+                className="gap-1"
+                onClick={() => {
+                  if (historyDiffMode) {
+                    cancelHistoryDiff()
+                  } else {
+                    setHistoryDiffMode(true)
+                    setHistoryDiffFromId(null)
+                    setHistoryDiffError('')
+                  }
+                }}
+              >
+                {historyDiffMode ? <X className="h-3.5 w-3.5" /> : <ArrowLeftRight className="h-3.5 w-3.5" />}
+                {historyDiffMode ? t('history.diff.cancel') : t('history.diff.button')}
+              </Button>
+            </div>
+
+            {historyFiltersOpen && (
+              <div className="flex flex-col gap-2.5 p-3 rounded-lg border bg-muted/50">
+                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                  {t('history.category')}
+                  <Select value={historyCategory} onValueChange={(value) => setHistoryCategory(value as AuditCategory)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {AUDIT_CATEGORIES.map((category) => (
+                        <SelectItem key={category} value={category}>
+                          {t(`history.categories.${category}`)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                  {t('history.from')}
+                  <Input type="datetime-local" value={historyFrom} onChange={(event) => setHistoryFrom(event.target.value)} />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                  {t('history.to')}
+                  <Input type="datetime-local" value={historyTo} onChange={(event) => setHistoryTo(event.target.value)} />
+                </label>
+                <Button variant="ghost" size="sm" onClick={clearHistoryFilters}>
+                  {t('history.clearFilters')}
+                </Button>
+              </div>
+            )}
+
+            {historyDiffMode && (
+              <p className={historyDiffError ? 'text-sm text-destructive bg-destructive/10 p-2 rounded-md' : 'text-sm text-muted-foreground bg-muted p-2 rounded-md'}>
+                {historyDiffError ||
+                  (historyDiffLoading
+                    ? t('history.diff.loading')
+                    : historyDiffFromId
+                      ? t('history.diff.pickEnd')
+                      : t('history.diff.pickStart'))}
+              </p>
+            )}
+          </div>
+
+          {filteredAuditEvents.length === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-6">{t('history.empty')}</p>
+          )}
+
+          {filteredAuditEvents.map((event) => {
+            const formatted = formatAuditEvent(event, t, auditFormatContext)
+            const expanded = expandedAuditIds.has(event.id)
+            const expandable = formatted.body.length > AUDIT_COLLAPSE_LIMIT
+            const body = expandable && !expanded ? truncateAuditText(formatted.body) : formatted.body
+            const diffSelected = historyDiffFromId === event.id
+            return (
+              <div
+                key={event.id}
+                data-audit-id={event.id}
+                className={[
+                  'flex flex-col gap-1.5 p-3 rounded-lg border text-sm',
+                  historyDiffMode ? 'cursor-pointer hover:border-primary hover:bg-primary/5' : '',
+                  diffSelected ? 'border-primary bg-primary/5' : 'bg-card',
+                ].filter(Boolean).join(' ')}
+                tabIndex={0}
+                onClick={() => {
+                  if (historyDiffMode) {
+                    void selectAuditForDiff(event)
+                    return
+                  }
+                  if (expandable) toggleAuditEvent(event.id)
+                }}
+                onKeyDown={(keyboardEvent) => {
+                  if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') {
+                    keyboardEvent.preventDefault()
                     if (historyDiffMode) {
                       void selectAuditForDiff(event)
-                      return
+                    } else if (expandable) {
+                      toggleAuditEvent(event.id)
                     }
-                    if (expandable) toggleAuditEvent(event.id)
-                  }}
-                  onKeyDown={(keyboardEvent) => {
-                    if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') {
-                      keyboardEvent.preventDefault()
-                      if (historyDiffMode) {
-                        void selectAuditForDiff(event)
-                      } else if (expandable) {
-                        toggleAuditEvent(event.id)
-                      }
-                    }
-                  }}
-                >
-                  <div className="audit-title-row">
-                    <strong>{formatted.title}</strong>
-                    {editingAuditNoteId === event.id ? null : (
-                      <button
-                        type="button"
-                        className="audit-note-link"
-                        onClick={(clickEvent) => {
-                          clickEvent.stopPropagation()
-                          startAuditNoteEdit(event)
-                        }}
-                        onKeyDown={(keyboardEvent) => keyboardEvent.stopPropagation()}
-                      >
-                        {event.note_body || t('history.note.add')}
-                      </button>
-                    )}
-                  </div>
-                  <span>
-                    {event.actor_nickname} · {t(`role.${event.role_mode}`)} · {t(`history.categories.${formatted.category}`)} · {formatDate(event.created_at)}
-                  </span>
-                  {editingAuditNoteId === event.id ? (
-                    <section className="audit-note-editor" onClick={(clickEvent) => clickEvent.stopPropagation()}>
-                      <textarea
-                        value={auditNoteDraft}
-                        maxLength={2000}
-                        onChange={(changeEvent) => setAuditNoteDraft(changeEvent.target.value)}
-                        placeholder={t('history.note.placeholder')}
-                      />
-                      <div className="mini-actions">
-                        <button type="button" className="primary" onClick={() => void saveAuditNote(event)}>
-                          {t('history.note.save')}
-                        </button>
-                        <button type="button" onClick={() => setEditingAuditNoteId(null)}>
-                          {t('history.note.cancel')}
-                        </button>
-                        <button type="button" onClick={() => void saveAuditNote(event, '')}>
-                          {t('history.note.clear')}
-                        </button>
-                      </div>
-                    </section>
-                  ) : null}
-                  {body ? <p className={expanded ? 'audit-body expanded' : 'audit-body'}>{body}</p> : null}
-                  {expandable ? (
+                  }
+                }}
+              >
+                <div className="flex items-baseline justify-between gap-3">
+                  <strong className="text-sm font-medium">{formatted.title}</strong>
+                  {editingAuditNoteId === event.id ? null : (
                     <button
                       type="button"
-                      className="link-button"
+                      className="text-xs text-primary underline truncate max-w-[46%] text-right"
                       onClick={(clickEvent) => {
                         clickEvent.stopPropagation()
-                        toggleAuditEvent(event.id)
+                        startAuditNoteEdit(event)
                       }}
+                      onKeyDown={(keyboardEvent) => keyboardEvent.stopPropagation()}
                     >
-                      {expanded ? t('history.showLess') : t('history.showMore')}
+                      {event.note_body || t('history.note.add')}
                     </button>
-                  ) : null}
-                </article>
-              )
-            })}
-          </section>
-        </div>
+                  )}
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  {event.actor_nickname} · {t(`role.${event.role_mode}`)} · {t(`history.categories.${formatted.category}`)} · {formatDate(event.created_at)}
+                </span>
+                {editingAuditNoteId === event.id && (
+                  <div className="flex flex-col gap-2" onClick={(clickEvent) => clickEvent.stopPropagation()}>
+                    <Textarea
+                      value={auditNoteDraft}
+                      maxLength={2000}
+                      onChange={(changeEvent) => setAuditNoteDraft(changeEvent.target.value)}
+                      placeholder={t('history.note.placeholder')}
+                      className="min-h-[72px]"
+                    />
+                    <div className="flex gap-2">
+                      <Button size="sm" onClick={() => void saveAuditNote(event)}>{t('history.note.save')}</Button>
+                      <Button size="sm" variant="ghost" onClick={() => setEditingAuditNoteId(null)}>{t('history.note.cancel')}</Button>
+                      <Button size="sm" variant="ghost" onClick={() => void saveAuditNote(event, '')}>{t('history.note.clear')}</Button>
+                    </div>
+                  </div>
+                )}
+                {body ? <p className="text-sm text-foreground whitespace-pre-wrap overflow-wrap-anywhere">{body}</p> : null}
+                {expandable && (
+                  <button
+                    type="button"
+                    className="text-xs text-primary underline self-start"
+                    onClick={(clickEvent) => {
+                      clickEvent.stopPropagation()
+                      toggleAuditEvent(event.id)
+                    }}
+                  >
+                    {expanded ? t('history.showLess') : t('history.showMore')}
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </SheetContent>
+      </Sheet>
+
+      {historyDiff ? (
+        <HistoryDiffModal
+          diff={historyDiff}
+          formatDate={formatDate}
+          closeLabel={t('history.diff.close')}
+          onClose={closeHistoryDiff}
+        />
       ) : null}
-      {historyDiff ? <HistoryDiffModal diff={historyDiff} formatDate={formatDate} closeLabel={t('history.diff.close')} onClose={closeHistoryDiff} /> : null}
     </main>
   )
 }

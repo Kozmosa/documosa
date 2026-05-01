@@ -1,21 +1,67 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+}
 
 :root {
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
-  color: #23251f;
-  background: #f7f7f4;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  --radius: 0.5rem;
+  --background: hsl(48 11% 96%);
+  --foreground: hsl(75 9% 13%);
+  --card: hsl(0 0% 100%);
+  --card-foreground: hsl(75 9% 13%);
+  --popover: hsl(0 0% 100%);
+  --popover-foreground: hsl(75 9% 13%);
+  --primary: hsl(165 31% 26%);
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(80 12% 95%);
+  --secondary-foreground: hsl(75 9% 13%);
+  --muted: hsl(80 12% 95%);
+  --muted-foreground: hsl(85 5% 39%);
+  --accent: hsl(80 12% 95%);
+  --accent-foreground: hsl(75 9% 13%);
+  --destructive: hsl(4 60% 54%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --border: hsl(80 12% 85%);
+  --input: hsl(80 12% 85%);
+  --ring: hsl(165 31% 26%);
 }
 
-* {
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 }
