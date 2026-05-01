@@ -23,8 +23,6 @@ import {
 import {
   Sheet,
   SheetContent,
-  SheetHeader,
-  SheetTitle,
 } from '@/components/ui/sheet'
 import {
   Dialog,
@@ -962,7 +960,7 @@ function App() {
 
   if (!identitySaved) {
     return (
-      <main className="identity-screen min-h-screen grid place-items-center bg-background">
+      <main className="min-h-screen grid place-items-center bg-background animate-in fade-in duration-300">
         <Card className="w-full max-w-md mx-auto">
           <CardContent className="pt-6">
             <form className="flex flex-col gap-4" onSubmit={saveIdentity}>
@@ -1003,12 +1001,10 @@ function App() {
 
       <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
         <SheetContent side="left" className="w-[300px] max-w-[calc(100vw-28px)] flex flex-col gap-4 overflow-auto">
-          <SheetHeader className="px-0">
-            <div className="flex items-baseline justify-between gap-3">
-              <SheetTitle className="text-xl font-semibold">{t('app.name')}</SheetTitle>
-              <span className="text-xs text-muted-foreground">{identity.nickname}</span>
-            </div>
-          </SheetHeader>
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="text-xl font-semibold">{t('app.name')}</h2>
+            <span className="text-xs text-muted-foreground">{identity.nickname}</span>
+          </div>
 
           <ToggleGroup
             type="single"
@@ -1075,7 +1071,7 @@ function App() {
       </Sheet>
 
       <section className="editor min-w-0 grid grid-rows-[auto_auto_1fr]">
-        <header className="flex items-center justify-between gap-4 px-5 py-4 min-h-[72px] bg-card border-b">
+        <header className="flex items-center justify-between gap-4 pl-16 pr-5 py-4 min-h-[72px] bg-card border-b">
           <div className="min-w-0">
             <h2 className="text-xl font-semibold truncate">{snapshot?.document.title ?? t('toolbar.noDocument')}</h2>
             <span className="text-xs text-muted-foreground">
@@ -1120,12 +1116,14 @@ function App() {
         </header>
 
         {remoteConflict ? (
-          <Alert className="flex items-center justify-between gap-3 rounded-none border-x-0 border-t-0 border-amber-200 bg-amber-50 text-amber-900">
-            <AlertDescription>{t('conflict.message')}</AlertDescription>
-            <Button variant="outline" size="sm" disabled={!snapshot} onClick={() => snapshot && void refreshSnapshot(snapshot.document.id)}>
-              <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-              {t('conflict.refresh')}
-            </Button>
+          <Alert className="rounded-none border-x-0 border-t-0">
+            <AlertDescription className="flex items-center justify-between gap-3">
+              <span>{t('conflict.message')}</span>
+              <Button variant="outline" size="sm" disabled={!snapshot} onClick={() => snapshot && void refreshSnapshot(snapshot.document.id)}>
+                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                {t('conflict.refresh')}
+              </Button>
+            </AlertDescription>
           </Alert>
         ) : null}
 
@@ -1156,8 +1154,7 @@ function App() {
 
       <aside
         id="review-column"
-        className="min-h-screen min-w-0 flex flex-col gap-4 p-4 overflow-auto bg-card border-l"
-        style={{ opacity: commentsOpen ? 1 : 0, pointerEvents: commentsOpen ? 'auto' : 'none', transform: commentsOpen ? 'translateX(0)' : 'translateX(18px)', transition: 'opacity 220ms, transform 220ms' }}
+        className="review-column min-h-screen min-w-0 flex flex-col gap-4 p-4 overflow-auto bg-card border-l"
         aria-hidden={!commentsOpen}
       >
         <Card>
@@ -1221,14 +1218,7 @@ function App() {
 
       <Sheet open={historyOpen} onOpenChange={(open) => { if (!open) closeHistoryDrawer() }}>
         <SheetContent side="right" className="w-[420px] max-w-full flex flex-col gap-3 overflow-auto">
-          <SheetHeader className="px-0 pb-0">
-            <div className="flex items-center justify-between gap-3">
-              <SheetTitle className="text-base font-medium">{t('history.title')}</SheetTitle>
-              <Button variant="ghost" size="icon-sm" onClick={closeHistoryDrawer} aria-label={t('history.close')}>
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          </SheetHeader>
+          <h2 className="text-base font-medium">{t('history.title')}</h2>
 
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between gap-2">

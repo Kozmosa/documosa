@@ -150,7 +150,7 @@ impl NotionBackend {
             .paragraph_lines(page_id)
             .await?
             .into_iter()
-            .map(|line| line.to_json())
+            .map(|line| line.into_json())
             .collect::<Vec<_>>();
         Ok(json!({
             "document": document,
@@ -329,7 +329,7 @@ struct NotionLine {
 }
 
 impl NotionLine {
-    fn to_json(self) -> Value {
+    fn into_json(self) -> Value {
         json!({
             "id": self.id,
             "document_id": self.document_id,

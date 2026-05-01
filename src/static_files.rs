@@ -41,10 +41,9 @@ pub async fn serve(State(state): State<AppState>, request: Request<Body>) -> Res
     if let (Ok(web_dir), Ok(resolved)) = (
         std::fs::canonicalize(&*state.web_dir),
         std::fs::canonicalize(&candidate),
-    ) {
-        if !resolved.starts_with(&web_dir) {
-            return StatusCode::FORBIDDEN.into_response();
-        }
+    ) && !resolved.starts_with(&web_dir)
+    {
+        return StatusCode::FORBIDDEN.into_response();
     }
 
     match tokio::fs::read(&candidate).await {

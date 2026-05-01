@@ -2234,3 +2234,374 @@ async fn document_creation_preserves_trailing_blank_lines() {
         .collect();
     assert_eq!(lines, vec!["one", "two", ""]);
 }
+
+// ─── mmdash adapter integration tests ───────────────────────────────
+
+const MMDASH_JWT_SECRET: &str = "test-jwt-secret-shared";
+
+fn ensure_jwt_secret() {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| unsafe {
+        std::env::set_var("JWT_SECRET", MMDASH_JWT_SECRET);
+    });
+}
+
+fn mmdash_token(sub: &str, name: Option<&str>) -> String {
+    use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+    use serde::Serialize;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[derive(Serialize)]
+    struct Claims {
+        sub: String,
+        name: Option<String>,
+        email: Option<String>,
+        exp: i64,
+    }
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let claims = Claims {
+        sub: sub.into(),
+        name: name.map(Into::into),
+        email: None,
+        exp: now + 3600,
+    };
+    let header = Header::new(Algorithm::HS256);
+    encode(
+        &header,
+        &claims,
+        &EncodingKey::from_secret(MMDASH_JWT_SECRET.as_bytes()),
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn mmdash_create_document_with_valid_jwt() {
+    ensure_jwt_secret();
+
+    let pool = pool().await;
+    let app = documosa::build_app(pool.clone(), PathBuf::from("missing")).await;
+
+    let token = mmdash_token("user-1", Some("Alice"));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/mmdash/documents")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::from(
+                    json!({"title": "New Doc", "content": "# Hello\n\nWorld"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["title"], "New Doc");
+    assert!(!body["page_id"].as_str().unwrap().is_empty());
+    assert!(body["created_at"].as_str().unwrap().contains('T'));
+}
+
+#[tokio::test]
+async fn mmdash_rejects_invalid_jwt() {
+    ensure_jwt_secret();
+
+    let pool = pool().await;
+    let app = documosa::build_app(pool, PathBuf::from("missing")).await;
+
+    let bad_token = "invalid.token.here";
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/mmdash/documents")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {bad_token}"))
+                .body(Body::from(json!({"title": "X"}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["error"], "unauthorized");
+}
+
+#[tokio::test]
+async fn mmdash_rejects_missing_jwt() {
+    ensure_jwt_secret();
+
+    let pool = pool().await;
+    let app = documosa::build_app(pool, PathBuf::from("missing")).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/mmdash/documents")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"title": "X"}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn mmdash_get_content_returns_blocks_and_markdown() {
+    ensure_jwt_secret();
+
+    let pool = pool().await;
+    let app = documosa::build_app(pool.clone(), PathBuf::from("missing")).await;
+
+    let writer = actor("writer", RoleMode::Writer);
+    let created = documosa::db::create_document(
+        &pool,
+        &writer,
+        "Blocks Doc".to_string(),
+        "# Title\n\nParagraph.\n```python\nprint(1)\n```\n$$ E = mc^2 $$\n- Bullet\n1. Number\n> Quote\n---".to_string(),
+    )
+    .await
+    .unwrap();
+    let document_id = created.document.id;
+
+    let token = mmdash_token("user-3", None);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/mmdash/documents/{document_id}/content"))
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["page_id"], document_id);
+    assert_eq!(body["title"], "Blocks Doc");
+    assert!(body["markdown"].as_str().unwrap().contains("# Title"));
+    let blocks = body["blocks"].as_array().unwrap();
+    assert_eq!(blocks[0]["type"], "heading_1");
+    assert_eq!(blocks[0]["content"], "Title");
+    assert_eq!(blocks[1]["type"], "paragraph");
+    assert_eq!(blocks[2]["type"], "code");
+    assert_eq!(blocks[2]["language"], "python");
+    assert_eq!(blocks[3]["type"], "equation");
+    assert_eq!(blocks[4]["type"], "bulleted_list_item");
+    assert_eq!(blocks[5]["type"], "numbered_list_item");
+    assert_eq!(blocks[6]["type"], "quote");
+    assert_eq!(blocks[7]["type"], "divider");
+}
+
+#[tokio::test]
+async fn mmdash_get_document_metadata() {
+    ensure_jwt_secret();
+
+    let pool = pool().await;
+    let app = documosa::build_app(pool.clone(), PathBuf::from("missing")).await;
+
+    let writer = actor("writer", RoleMode::Writer);
+    let created = documosa::db::create_document(
+        &pool,
+        &writer,
+        "Meta Doc".to_string(),
+        "content".to_string(),
+    )
+    .await
+    .unwrap();
+    let document_id = created.document.id;
+
+    let token = mmdash_token("user-4", None);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/mmdash/documents/{document_id}"))
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["page_id"], document_id);
+    assert_eq!(body["title"], "Meta Doc");
+    assert!(body["created_at"].as_str().unwrap().contains('T'));
+    assert!(body["updated_at"].as_str().unwrap().contains('T'));
+}
+
+#[tokio::test]
+async fn mmdash_returns_404_for_missing_document() {
+    ensure_jwt_secret();
+
+    let pool = pool().await;
+    let app = documosa::build_app(pool, PathBuf::from("missing")).await;
+
+    let token = mmdash_token("user-5", None);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/mmdash/documents/non-existent-id/content")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn mmdash_put_content_returns_409_on_stale_revision() {
+    ensure_jwt_secret();
+
+    let pool = pool().await;
+    let app = documosa::build_app(pool.clone(), PathBuf::from("missing")).await;
+
+    let writer = actor("writer", RoleMode::Writer);
+    let created = documosa::db::create_document(
+        &pool,
+        &writer,
+        "Conflict Doc".to_string(),
+        "one\ntwo".to_string(),
+    )
+    .await
+    .unwrap();
+    let document_id = created.document.id.clone();
+    let second_line_id = created.lines[1].id.clone();
+
+    // Have another client lock a line
+    let other = actor("other", RoleMode::Writer);
+    documosa::db::heartbeat_locks(&pool, &other, &document_id, vec![second_line_id.clone()])
+        .await
+        .unwrap();
+
+    let token = mmdash_token("user-6", None);
+    let conflict_response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/mmdash/documents/{document_id}/content"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::from(
+                    json!({"markdown": "should conflict"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(conflict_response.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn mmdash_put_content_updates_document() {
+    ensure_jwt_secret();
+
+    let pool = pool().await;
+    let app = documosa::build_app(pool.clone(), PathBuf::from("missing")).await;
+
+    let writer = actor("writer", RoleMode::Writer);
+    let created = documosa::db::create_document(
+        &pool,
+        &writer,
+        "Update Doc".to_string(),
+        "old content".to_string(),
+    )
+    .await
+    .unwrap();
+    let document_id = created.document.id;
+
+    let token = mmdash_token("user-7", None);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/mmdash/documents/{document_id}/content"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::from(
+                    json!({
+                        "title": "Updated Title",
+                        "blocks": [
+                            {"type": "heading_1", "content": "New Heading"},
+                            {"type": "paragraph", "content": "New paragraph."}
+                        ]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["title"], "Updated Title");
+    assert_eq!(body["blocks"][0]["type"], "heading_1");
+    assert_eq!(body["blocks"][0]["content"], "New Heading");
+    assert_eq!(body["blocks"][1]["type"], "paragraph");
+    assert_eq!(body["blocks"][1]["content"], "New paragraph.");
+    assert!(body["markdown"].as_str().unwrap().contains("# New Heading"));
+}
+
+#[tokio::test]
+async fn mmdash_identity_derived_from_token() {
+    ensure_jwt_secret();
+
+    let pool = pool().await;
+    let app = documosa::build_app(pool.clone(), PathBuf::from("missing")).await;
+
+    let token = mmdash_token("user-abc", Some("Bob"));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/mmdash/documents")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::from(json!({"title": "Identity Test"}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    let page_id = body["page_id"].as_str().unwrap();
+
+    // Verify audit event has mmdash-prefixed client_id
+    let snapshot = documosa::db::snapshot(&pool, page_id).await.unwrap();
+    let audit_event = snapshot
+        .audit_events
+        .iter()
+        .find(|event| event.event_type == "document.created")
+        .unwrap();
+    assert_eq!(audit_event.actor_client_id, "mmdash-user-abc");
+    assert_eq!(audit_event.actor_nickname, "Bob");
+    assert_eq!(audit_event.role_mode, "writer");
+}

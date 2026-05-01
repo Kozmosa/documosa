@@ -7,6 +7,7 @@ edition = "2024"
 anyhow = "1"
 axum = { version = "0.8", features = ["json", "macros", "ws"] }
 chrono = { version = "0.4", features = ["serde"] }
+jsonwebtoken = "9"
 clap = { version = "4", features = ["derive", "env"] }
 dirs = "6"
 futures-util = "0.3"

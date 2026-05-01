@@ -11,6 +11,7 @@ use crate::AppState;
 use crate::db;
 use crate::error::{AppError, Result};
 use crate::models::{BaseRevision, HistoryCategory, HistoryListOptions, Identity, RoleMode};
+use crate::mmdash_api;
 use crate::realtime;
 
 pub fn router() -> Router<AppState> {
@@ -78,6 +79,7 @@ pub fn router() -> Router<AppState> {
             post(reject_suggestion),
         )
         .route("/api/documents/{document_id}/ws", get(ws))
+        .merge(mmdash_api::router())
 }
 
 #[derive(Deserialize)]
