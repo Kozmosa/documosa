@@ -136,6 +136,32 @@ pub async fn list_documents(pool: &SqlitePool) -> Result<Vec<Document>> {
     .await?)
 }
 
+pub async fn update_document_title(
+    pool: &SqlitePool,
+    actor: &Identity,
+    document_id: &str,
+    title: &str,
+) -> Result<()> {
+    let mut tx = begin_write_tx(pool).await?;
+    let timestamp = now();
+    sqlx::query("UPDATE documents SET title = ?, updated_at = ? WHERE id = ?")
+        .bind(title)
+        .bind(&timestamp)
+        .bind(document_id)
+        .execute(&mut *tx)
+        .await?;
+    audit_tx(
+        &mut tx,
+        document_id,
+        actor,
+        "document.title_updated",
+        json!({ "title": title }),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 pub async fn snapshot(pool: &SqlitePool, document_id: &str) -> Result<DocumentSnapshot> {
     let timestamp = now();
     let document = sqlx::query_as::<_, Document>(

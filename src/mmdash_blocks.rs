@@ -145,11 +145,26 @@ pub fn markdown_to_blocks(markdown: &str) -> Vec<Block> {
             continue;
         }
 
-        // Equation: $$ ... $$
-        if line.starts_with("$$") && line.ends_with("$$") && line.len() > 4 {
-            let content = line[2..line.len() - 2].trim().to_string();
-            blocks.push(Block::equation(content));
+        // Equation: $$ ... $$ (single line or multi-line)
+        if line.starts_with("$$") {
+            // Single-line: $$ content $$
+            if line.len() > 4 && line.ends_with("$$") {
+                let content = line[2..line.len() - 2].trim().to_string();
+                blocks.push(Block::equation(content));
+                i += 1;
+                continue;
+            }
+            // Multi-line: $$\n...\n$$
             i += 1;
+            let mut eq_lines = Vec::new();
+            while i < lines.len() && !lines[i].starts_with("$$") {
+                eq_lines.push(lines[i]);
+                i += 1;
+            }
+            if i < lines.len() {
+                i += 1; // skip closing $$
+            }
+            blocks.push(Block::equation(eq_lines.join("\n")));
             continue;
         }
 
@@ -240,7 +255,13 @@ pub fn blocks_to_markdown(blocks: &[Block]) -> String {
             }
             BlockType::Equation => {
                 if let Some(content) = &block.content {
-                    lines.push(format!("$$ {} $$", content));
+                    if content.contains('\n') {
+                        lines.push("$$".to_string());
+                        lines.push(content.clone());
+                        lines.push("$$".to_string());
+                    } else {
+                        lines.push(format!("$$ {} $$", content));
+                    }
                 }
             }
             BlockType::BulletedListItem => {
@@ -315,10 +336,20 @@ mod tests {
     }
 
     #[test]
-    fn test_equation() {
+    fn test_equation_single_line() {
         let markdown = "$$ E = mc^2 $$";
         let blocks = markdown_to_blocks(markdown);
         assert_eq!(blocks, vec![Block::equation("E = mc^2")]);
+    }
+
+    #[test]
+    fn test_equation_multi_line() {
+        let markdown = "$$\na + b = c\nx^2 + y^2 = z^2\n$$";
+        let blocks = markdown_to_blocks(markdown);
+        assert_eq!(
+            blocks,
+            vec![Block::equation("a + b = c\nx^2 + y^2 = z^2")]
+        );
     }
 
     #[test]
@@ -367,7 +398,10 @@ Plain text paragraph.
 ```python
 import numpy as np
 ```
-$$ E = mc^2 $$
+$$
+a + b = c
+d + e = f
+$$
 - List item 1
 1. Numbered item 1
 
@@ -381,7 +415,7 @@ $$ E = mc^2 $$
         assert_eq!(blocks[1], Block::heading_2("Subheading"));
         assert_eq!(blocks[2], Block::paragraph("Plain text paragraph."));
         assert_eq!(blocks[3], Block::code("import numpy as np", "python"));
-        assert_eq!(blocks[4], Block::equation("E = mc^2"));
+        assert_eq!(blocks[4], Block::equation("a + b = c\nd + e = f"));
         assert_eq!(blocks[5], Block::bulleted_list_item("List item 1"));
         assert_eq!(blocks[6], Block::numbered_list_item("Numbered item 1"));
         assert_eq!(blocks[7], Block::quote("A quote."));
@@ -407,10 +441,17 @@ $$ E = mc^2 $$
     }
 
     #[test]
-    fn test_blocks_to_markdown_equation() {
+    fn test_blocks_to_markdown_equation_single_line() {
         let blocks = vec![Block::equation("E = mc^2")];
         let md = blocks_to_markdown(&blocks);
         assert_eq!(md, "$$ E = mc^2 $$");
+    }
+
+    #[test]
+    fn test_blocks_to_markdown_equation_multi_line() {
+        let blocks = vec![Block::equation("a + b = c\nx^2 + y^2 = z^2")];
+        let md = blocks_to_markdown(&blocks);
+        assert_eq!(md, "$$\na + b = c\nx^2 + y^2 = z^2\n$$");
     }
 
     #[test]
@@ -422,6 +463,10 @@ Paragraph text.
 fn main() {}
 ```
 $$ x^2 $$
+$$
+a + b = c
+d + e = f
+$$
 - Bullet
 1. Number
 > Quote
@@ -430,5 +475,15 @@ $$ x^2 $$
         let reconstructed = blocks_to_markdown(&blocks);
         let blocks2 = markdown_to_blocks(&reconstructed);
         assert_eq!(blocks, blocks2);
+    }
+
+    #[test]
+    fn test_multi_line_equation_in_document() {
+        let markdown = "# Math\n\n$$\na + b = c\nd + e = f\n$$\n\nParagraph.";
+        let blocks = markdown_to_blocks(markdown);
+        assert_eq!(blocks.len(), 3);
+        assert_eq!(blocks[0], Block::heading_1("Math"));
+        assert_eq!(blocks[1], Block::equation("a + b = c\nd + e = f"));
+        assert_eq!(blocks[2], Block::paragraph("Paragraph."));
     }
 }

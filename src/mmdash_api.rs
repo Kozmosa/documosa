@@ -150,10 +150,10 @@ async fn update_content(
     )
     .await?;
 
-    // Optionally update title
-    let final_title = if let Some(title) = body.title {
-        update_document_title(&state.pool, &document_id, &title).await?;
-        title
+    // Optionally update title (audited)
+    let final_title = if let Some(ref title) = body.title {
+        db::update_document_title(&state.pool, &actor, &document_id, title).await?;
+        title.clone()
     } else {
         updated.document.title
     };
@@ -175,12 +175,3 @@ async fn update_content(
     }))
 }
 
-async fn update_document_title(pool: &sqlx::SqlitePool, document_id: &str, title: &str) -> Result<()> {
-    sqlx::query("UPDATE documents SET title = ?, updated_at = ? WHERE id = ?")
-        .bind(title)
-        .bind(crate::models::now())
-        .bind(document_id)
-        .execute(pool)
-        .await?;
-    Ok(())
-}

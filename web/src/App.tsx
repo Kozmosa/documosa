@@ -23,10 +23,13 @@ import {
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
+  SheetTitle,
 } from '@/components/ui/sheet'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -35,7 +38,14 @@ import {
   ToggleGroupItem,
 } from '@/components/ui/toggle-group'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import {
   LogIn,
   Menu,
@@ -51,9 +61,18 @@ import {
   ArrowLeftRight,
   MessageSquarePlus,
   RefreshCw,
+  Users,
+  Lock,
 } from 'lucide-react'
 
 type RoleMode = 'reviewer' | 'writer'
+
+type PresenceUser = {
+  document_id: string
+  client_id: string
+  nickname: string
+  role_mode: RoleMode
+}
 
 type DocumentSummary = {
   id: string
@@ -492,12 +511,10 @@ function HistoryDiffModal({
   diff,
   formatDate,
   onClose,
-  closeLabel,
 }: {
   diff: HistoryDiffResponse
   formatDate: (value: string) => string
   onClose: () => void
-  closeLabel: string
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const title = `Diff: ${formatDate(diff.from_event.created_at)} -> ${formatDate(diff.to_event.created_at)}`
@@ -505,49 +522,60 @@ function HistoryDiffModal({
   useEffect(() => {
     const container = containerRef.current
     if (!container) return undefined
-    const aceDiff = new AceDiff({
-      ace,
-      element: container,
-      mode: 'ace/mode/markdown',
-      theme: 'ace/theme/textmate',
-      diffGranularity: 'specific',
-      showConnectors: true,
-      showDiffs: true,
-      lockScrolling: true,
-      left: {
-        content: diff.from_content,
-        editable: false,
-        copyLinkEnabled: false,
-      },
-      right: {
-        content: diff.to_content,
-        editable: false,
-        copyLinkEnabled: false,
-      },
-    })
-    const editors = aceDiff.getEditors()
-    for (const editor of [editors.left, editors.right]) {
-      editor.setReadOnly(true)
-      editor.session.setUseWorker(false)
-      editor.setOptions({
-        highlightActiveLine: false,
-        highlightGutterLine: false,
-        showPrintMargin: false,
-        wrap: true,
+    let destroyed = false
+    let aceDiff: AceDiff | null = null
+    const handle = setTimeout(() => {
+      if (destroyed || !container.isConnected) return
+      aceDiff = new AceDiff({
+        ace,
+        element: container,
+        mode: 'ace/mode/markdown',
+        theme: 'ace/theme/textmate',
+        diffGranularity: 'specific',
+        showConnectors: true,
+        showDiffs: true,
+        lockScrolling: true,
+        left: {
+          content: diff.from_content,
+          editable: false,
+          copyLinkEnabled: false,
+        },
+        right: {
+          content: diff.to_content,
+          editable: false,
+          copyLinkEnabled: false,
+        },
       })
+      if (destroyed) {
+        aceDiff.destroy()
+        return
+      }
+      const editors = aceDiff.getEditors()
+      for (const editor of [editors.left, editors.right]) {
+        editor.setReadOnly(true)
+        editor.session.setUseWorker(false)
+        editor.setOptions({
+          highlightActiveLine: false,
+          highlightGutterLine: false,
+          showPrintMargin: false,
+          wrap: true,
+        })
+      }
+    }, 100)
+    return () => {
+      destroyed = true
+      clearTimeout(handle)
+      aceDiff?.destroy()
     }
-    return () => aceDiff.destroy()
   }, [diff])
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-[1120px] w-[96vw] max-h-[760px] h-[92vh] flex flex-col gap-3 p-5" aria-label={title}>
+      <DialogContent className="max-w-[1120px] w-[96vw] max-h-[760px] h-[92vh] flex flex-col gap-3 p-5">
         <DialogHeader className="flex flex-row items-center justify-between gap-3">
           <DialogTitle className="text-lg">{title}</DialogTitle>
-          <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label={closeLabel}>
-            <X className="h-4 w-4" />
-          </Button>
         </DialogHeader>
+        <DialogDescription className="sr-only">Side-by-side diff view of document versions</DialogDescription>
         <div className="flex justify-between text-xs text-muted-foreground px-1">
           <span>{diff.from_event.event_type}</span>
           <span>{diff.to_event.event_type}</span>
@@ -648,6 +676,8 @@ function App() {
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null)
   const [flashingCommentId, setFlashingCommentId] = useState<string | null>(null)
   const [status, setStatus] = useState('')
+  const [onlineUsers, setOnlineUsers] = useState<PresenceUser[]>([])
+  const [presenceOpen, setPresenceOpen] = useState(false)
   const cherryRef = useRef<CherryInstance | null>(null)
   const dirtyRef = useRef(false)
 
@@ -784,8 +814,12 @@ function App() {
     socket.onmessage = (message) => {
       let topic = ''
       try {
-        const event = JSON.parse(message.data) as { type?: string; topic?: string }
+        const event = JSON.parse(message.data) as { type?: string; topic?: string; users?: PresenceUser[] }
         if (event.type === 'document_changed') topic = event.topic ?? ''
+        if (event.type === 'presence' && event.users) {
+          setOnlineUsers(event.users)
+          return
+        }
       } catch {
         topic = ''
       }
@@ -960,7 +994,8 @@ function App() {
 
   if (!identitySaved) {
     return (
-      <main className="min-h-screen grid place-items-center bg-background animate-in fade-in duration-300">
+      <TooltipProvider>
+        <main className="min-h-screen grid place-items-center bg-background animate-in fade-in duration-300">
         <Card className="w-full max-w-md mx-auto">
           <CardContent className="pt-6">
             <form className="flex flex-col gap-4" onSubmit={saveIdentity}>
@@ -990,21 +1025,24 @@ function App() {
           </CardContent>
         </Card>
       </main>
+      </TooltipProvider>
     )
   }
 
   return (
+    <TooltipProvider>
     <main className={commentsOpen ? 'workspace' : 'workspace comments-collapsed'}>
       <Button variant="ghost" size="icon" className="sidebar-toggle" onClick={() => setSidebarOpen(true)} aria-label={t('docs.open')}>
         <Menu className="h-4 w-4" />
       </Button>
 
       <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
-        <SheetContent side="left" className="w-[300px] max-w-[calc(100vw-28px)] flex flex-col gap-4 overflow-auto">
-          <div className="flex items-baseline justify-between gap-3">
-            <h2 className="text-xl font-semibold">{t('app.name')}</h2>
-            <span className="text-xs text-muted-foreground">{identity.nickname}</span>
-          </div>
+        <SheetContent side="left" className="w-[300px] max-w-[calc(100vw-28px)] flex flex-col gap-4 overflow-auto p-6">
+          <SheetTitle className="flex items-baseline justify-between gap-3 text-xl font-semibold">
+            <span>{t('app.name')}</span>
+            <span className="text-xs text-muted-foreground font-normal">{identity.nickname}</span>
+          </SheetTitle>
+          <SheetDescription className="sr-only">Document list and settings</SheetDescription>
 
           <ToggleGroup
             type="single"
@@ -1074,11 +1112,57 @@ function App() {
         <header className="flex items-center justify-between gap-4 pl-16 pr-5 py-4 min-h-[72px] bg-card border-b">
           <div className="min-w-0">
             <h2 className="text-xl font-semibold truncate">{snapshot?.document.title ?? t('toolbar.noDocument')}</h2>
-            <span className="text-xs text-muted-foreground">
-              {snapshot
-                ? `${t('toolbar.lineCount', { count: activeLines.length })} · ${dirty ? t('toolbar.unsaved') : t('toolbar.saved')}`
-                : t('toolbar.openOrCreate')}
-            </span>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span>
+                {snapshot
+                  ? `${t('toolbar.lineCount', { count: activeLines.length })} · ${dirty ? t('toolbar.unsaved') : t('toolbar.saved')}`
+                  : t('toolbar.openOrCreate')}
+              </span>
+              {snapshot && onlineUsers.length > 0 && (
+                <button
+                  type="button"
+                  className="flex items-center gap-1 hover:text-foreground transition-colors"
+                  onClick={() => setPresenceOpen((open) => !open)}
+                >
+                  <Users className="h-3 w-3" />
+                  <Badge variant="secondary" className="text-[10px] px-1 py-0 h-4">
+                    {onlineUsers.length}
+                  </Badge>
+                </button>
+              )}
+              {snapshot && snapshot.locks.length > 0 && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="flex items-center gap-1 cursor-help">
+                      <Lock className="h-3 w-3" />
+                      <Badge variant="secondary" className="text-[10px] px-1 py-0 h-4">
+                        {snapshot.locks.length}
+                      </Badge>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    {snapshot.locks.map((lock) => (
+                      <div key={lock.line_id} className="text-xs">
+                        {lock.owner_nickname} · {new Date(lock.expires_at).toLocaleTimeString()}
+                      </div>
+                    ))}
+                  </TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+            {presenceOpen && onlineUsers.length > 0 && (
+              <div className="mt-1.5 flex flex-wrap gap-1 animate-in fade-in slide-in-from-top-1 duration-200">
+                {onlineUsers.map((user) => (
+                  <Badge
+                    key={user.client_id}
+                    variant={user.role_mode === 'writer' ? 'default' : 'outline'}
+                    className="text-[10px] px-1.5 py-0 h-5"
+                  >
+                    {user.nickname}
+                  </Badge>
+                ))}
+              </div>
+            )}
           </div>
           <div className="flex gap-2 flex-wrap">
             <Button size="sm" disabled={!snapshot || !dirty || identity.roleMode !== 'writer' || remoteConflict} onClick={() => void saveContent()}>
@@ -1217,8 +1301,9 @@ function App() {
       </aside>
 
       <Sheet open={historyOpen} onOpenChange={(open) => { if (!open) closeHistoryDrawer() }}>
-        <SheetContent side="right" className="w-[420px] max-w-full flex flex-col gap-3 overflow-auto">
-          <h2 className="text-base font-medium">{t('history.title')}</h2>
+        <SheetContent side="right" className="w-[420px] max-w-full flex flex-col gap-3 overflow-auto p-5">
+          <SheetTitle className="text-base font-medium">{t('history.title')}</SheetTitle>
+          <SheetDescription className="sr-only">Document history and audit events</SheetDescription>
 
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between gap-2">
@@ -1384,11 +1469,11 @@ function App() {
         <HistoryDiffModal
           diff={historyDiff}
           formatDate={formatDate}
-          closeLabel={t('history.diff.close')}
           onClose={closeHistoryDiff}
         />
       ) : null}
     </main>
+    </TooltipProvider>
   )
 }
 

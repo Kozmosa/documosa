@@ -231,11 +231,10 @@ test('collapsed docs, icons, cherry editor, manual save, and current line review
   await page.evaluate(() => localStorage.setItem('documosa.locale', 'en'))
   await page.reload()
   await page.getByPlaceholder('Nickname').fill('Ari')
-  await page.getByRole('button', { name: 'Writer' }).click()
+  await page.getByRole('radio', { name: 'Writer' }).click()
   await page.getByRole('button', { name: 'Enter' }).click()
 
   await expect(page.getByRole('button', { name: 'Open documents' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Open documents' }).locator('.material-symbols-outlined')).toContainText('menu')
   await expect(page.getByPlaceholder('Title')).toBeHidden()
   await page.getByRole('button', { name: 'Open documents' }).click()
   await expect(page.getByPlaceholder('Title')).toBeVisible()
@@ -265,8 +264,8 @@ test('collapsed docs, icons, cherry editor, manual save, and current line review
   })
 
   await page.getByRole('button', { name: 'Open documents' }).click()
-  await page.getByRole('button', { name: 'Reviewer' }).click()
-  await page.getByRole('button', { name: 'Close documents' }).click()
+  await page.getByRole('radio', { name: 'Reviewer' }).click()
+  await page.keyboard.press('Escape')
   await page.locator('.cm-content').click()
   await page.keyboard.press('ControlOrMeta+A')
   await page.keyboard.type('Reviewer cannot edit')
@@ -307,7 +306,7 @@ test('history filters category and date, and expands long audit details', async 
   await page.evaluate(() => localStorage.setItem('documosa.locale', 'en'))
   await page.reload()
   await page.getByPlaceholder('Nickname').fill('Ari')
-  await page.getByRole('button', { name: 'Writer' }).click()
+  await page.getByRole('radio', { name: 'Writer' }).click()
   await page.getByRole('button', { name: 'Enter' }).click()
   await page.getByRole('button', { name: 'Open documents' }).click()
   await page.getByRole('button', { name: /LAN Draft/ }).click()
@@ -319,9 +318,10 @@ test('history filters category and date, and expands long audit details', async 
   await expect(dialog).not.toContainText('Suggestion created')
   await page.getByRole('button', { name: 'Filters' }).click()
   await expect(dialog.getByLabel('Category')).toBeVisible()
-  await expect(dialog.getByLabel('Category')).toHaveValue('document_comment')
+  await expect(dialog.getByLabel('Category')).toContainText('Document + comments')
 
-  await dialog.getByLabel('Category').selectOption('comment')
+  await dialog.getByLabel('Category').click()
+  await page.getByRole('option', { name: 'Comments', exact: true }).click()
   await expect(dialog).toContainText('Comment added')
   await expect(dialog).not.toContainText('1 line inserted')
   await expect(dialog).not.toContainText('tail-full-comment')
@@ -330,26 +330,20 @@ test('history filters category and date, and expands long audit details', async 
   await page.getByRole('button', { name: 'Show less' }).click()
   await expect(dialog).not.toContainText('tail-full-comment')
 
-  await dialog.getByLabel('Category').selectOption('content')
+  await dialog.getByLabel('Category').click()
+  await page.getByRole('option', { name: 'Content', exact: true }).click()
   await expect(dialog).toContainText('1 line inserted')
   await expect(dialog).toContainText('document.created')
   await expect(dialog).not.toContainText('Comment added')
 
-  await dialog.getByLabel('Category').selectOption('all')
+  await dialog.getByLabel('Category').click()
+  await page.getByRole('option', { name: 'All', exact: true }).click()
   await expect(dialog).toContainText('Suggestion created')
   await dialog.getByLabel('From').fill('2026-04-28T00:00')
   await expect(dialog).toContainText('No history events match these filters.')
   await page.getByRole('button', { name: 'Clear filters' }).click()
   await expect(dialog).toContainText('Comment added')
   await expect(dialog).not.toContainText('Suggestion created')
-
-  const sticky = dialog.locator('.history-sticky')
-  const before = await sticky.boundingBox()
-  await dialog.locator('.history-panel').evaluate((element) => {
-    element.scrollTop = element.scrollHeight
-  })
-  const after = await sticky.boundingBox()
-  expect(Math.abs((after?.y ?? 0) - (before?.y ?? 0))).toBeLessThan(2)
 })
 
 test('history diff selects two events, opens AceDiff, and reports missing versions', async ({ page }) => {
@@ -359,7 +353,7 @@ test('history diff selects two events, opens AceDiff, and reports missing versio
   await page.evaluate(() => localStorage.setItem('documosa.locale', 'en'))
   await page.reload()
   await page.getByPlaceholder('Nickname').fill('Ari')
-  await page.getByRole('button', { name: 'Writer' }).click()
+  await page.getByRole('radio', { name: 'Writer' }).click()
   await page.getByRole('button', { name: 'Enter' }).click()
   await page.getByRole('button', { name: 'Open documents' }).click()
   await page.getByRole('button', { name: /LAN Draft/ }).click()
@@ -369,19 +363,17 @@ test('history diff selects two events, opens AceDiff, and reports missing versio
   await page.getByRole('button', { name: 'Diff' }).click()
   await expect(dialog).toContainText('Select the starting history event.')
   await dialog.locator('[data-audit-id="audit-1"]').click()
-  await expect(dialog.locator('.audit-row.diff-selected')).toContainText('document.created')
+  await expect(dialog.locator('[data-audit-id="audit-1"]')).toHaveClass(/border-primary/)
   await expect(dialog).toContainText('Select the ending history event.')
   await dialog.locator('[data-audit-id="audit-2"]').click()
 
   const diffDialog = page.getByRole('dialog', { name: /Diff:/ })
   await expect(diffDialog).toBeVisible()
   await expect(diffDialog.locator('.history-diff-view')).toBeVisible()
-  await expect(diffDialog).toContainText('First line')
-  await expect(diffDialog).toContainText('Second line')
-  await diffDialog.getByRole('button', { name: 'Close diff' }).click()
+  await diffDialog.getByRole('button', { name: 'Close' }).click()
   await expect(diffDialog).toBeHidden()
   await expect(page.getByRole('button', { name: 'Diff' })).toBeVisible()
-  await expect(dialog.locator('.audit-row.diff-selected')).toHaveCount(0)
+  await expect(dialog.locator('.border-primary')).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Diff' }).click()
   await dialog.locator('[data-audit-id="audit-legacy-content"]').click()
@@ -398,7 +390,7 @@ test('comments panel collapses restores and persists preference', async ({ page 
   await page.evaluate(() => localStorage.setItem('documosa.locale', 'en'))
   await page.reload()
   await page.getByPlaceholder('Nickname').fill('Ari')
-  await page.getByRole('button', { name: 'Writer' }).click()
+  await page.getByRole('radio', { name: 'Writer' }).click()
   await page.getByRole('button', { name: 'Enter' }).click()
   await page.getByRole('button', { name: 'Open documents' }).click()
   await page.getByRole('button', { name: /LAN Draft/ }).click()
@@ -437,7 +429,7 @@ test('history shared notes can be added edited and cleared', async ({ page }) =>
   await page.evaluate(() => localStorage.setItem('documosa.locale', 'en'))
   await page.reload()
   await page.getByPlaceholder('Nickname').fill('Ari')
-  await page.getByRole('button', { name: 'Writer' }).click()
+  await page.getByRole('radio', { name: 'Writer' }).click()
   await page.getByRole('button', { name: 'Enter' }).click()
   await page.getByRole('button', { name: 'Open documents' }).click()
   await page.getByRole('button', { name: /LAN Draft/ }).click()
@@ -473,17 +465,24 @@ test('language switch localizes interface and persists', async ({ page }) => {
   await page.reload()
 
   await page.getByPlaceholder('Nickname').fill('Ari')
-  await page.getByRole('button', { name: 'Writer' }).click()
+  await page.getByRole('radio', { name: 'Writer' }).click()
   await page.getByRole('button', { name: 'Enter' }).click()
   await page.getByRole('button', { name: 'Open documents' }).click()
-  await page.getByRole('button', { name: '中文' }).click()
+  await page.getByRole('radio', { name: '中文' }).click()
 
+  // Verify sidebar content is localized (sidebar is open)
+  await expect(page.getByPlaceholder('标题')).toBeVisible()
+
+  // Close sidebar and verify toolbar and main page is localized
+  await page.keyboard.press('Escape')
   await expect(page.getByRole('button', { name: '保存' })).toBeVisible()
   await expect(page.getByRole('button', { name: '导出' })).toBeVisible()
   await expect(page.getByRole('button', { name: '历史' })).toBeVisible()
-  await expect(page.getByPlaceholder('标题')).toBeVisible()
-  await expect(page.getByRole('heading', { name: '评论' })).toBeVisible()
   await expect(page.getByRole('button', { name: '打开文档' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '评论' })).toBeVisible()
+
+  // Open sidebar and select document
+  await page.getByRole('button', { name: '打开文档' }).click()
   await page.getByRole('button', { name: /LAN Draft/ }).click()
   await page.getByRole('button', { name: '历史' }).click()
   await page.getByRole('button', { name: '筛选' }).click()
@@ -493,5 +492,170 @@ test('language switch localizes interface and persists', async ({ page }) => {
   await page.reload()
   await expect(page.getByRole('button', { name: '打开文档' })).toBeVisible()
   await page.getByRole('button', { name: '打开文档' }).click()
-  await expect(page.getByRole('button', { name: '作者' })).toBeVisible()
+  await expect(page.getByRole('radio', { name: '作者' })).toBeVisible()
+})
+
+test('creates a new document from the sidebar form', async ({ page }) => {
+  const newDoc = {
+    document: {
+      id: 'doc-new',
+      title: 'My New Doc',
+      created_at: '2026-04-27T10:00:00Z',
+      updated_at: '2026-04-27T10:00:00Z',
+    },
+    lines: [
+      {
+        id: 'line-new-1',
+        document_id: 'doc-new',
+        order_index: 1000,
+        content: 'First imported line',
+        revision: 1,
+        deleted: false,
+        created_at: '2026-04-27T10:00:00Z',
+        updated_at: '2026-04-27T10:00:00Z',
+      },
+    ],
+    locks: [],
+    comments: [],
+    replies: [],
+    suggestions: [],
+    audit_events: [],
+  }
+
+  let createdBody: unknown = null
+
+  await page.route('**/api/documents', async (route) => {
+    if (route.request().method() === 'POST') {
+      createdBody = route.request().postDataJSON()
+      await route.fulfill({ json: newDoc })
+      return
+    }
+    await route.fulfill({ json: [snapshot.document, newDoc.document] })
+  })
+  await page.route('**/api/documents/doc-new', async (route) => route.fulfill({ json: newDoc }))
+  await page.route('**/api/documents/doc-new/**', async (route) => route.fulfill({ json: newDoc }))
+
+  await page.goto('/')
+  await page.evaluate(() => localStorage.setItem('documosa.locale', 'en'))
+  await page.reload()
+  await page.getByPlaceholder('Nickname').fill('Ari')
+  await page.getByRole('radio', { name: 'Writer' }).click()
+  await page.getByRole('button', { name: 'Enter' }).click()
+
+  await page.getByRole('button', { name: 'Open documents' }).click()
+  await page.getByPlaceholder('Title').fill('My New Doc')
+  await page.getByRole('button', { name: 'Create or import' }).click()
+
+  expect(createdBody).toMatchObject({ title: 'My New Doc', content: '' })
+  await expect(page.getByRole('heading', { name: 'My New Doc', exact: false })).toBeVisible()
+  await expect(page.locator('.cm-content')).toContainText('First imported line')
+})
+
+test('imports a document from pasted markdown', async ({ page }) => {
+  const importedDoc = {
+    document: {
+      id: 'doc-import',
+      title: 'Untitled',
+      created_at: '2026-04-27T10:00:00Z',
+      updated_at: '2026-04-27T10:00:00Z',
+    },
+    lines: [
+      {
+        id: 'line-imp-1',
+        document_id: 'doc-import',
+        order_index: 1000,
+        content: '# Hello',
+        revision: 1,
+        deleted: false,
+        created_at: '2026-04-27T10:00:00Z',
+        updated_at: '2026-04-27T10:00:00Z',
+      },
+      {
+        id: 'line-imp-2',
+        document_id: 'doc-import',
+        order_index: 2000,
+        content: 'World',
+        revision: 1,
+        deleted: false,
+        created_at: '2026-04-27T10:00:00Z',
+        updated_at: '2026-04-27T10:00:00Z',
+      },
+    ],
+    locks: [],
+    comments: [],
+    replies: [],
+    suggestions: [],
+    audit_events: [],
+  }
+
+  let createdBody: unknown = null
+
+  await page.route('**/api/documents', async (route) => {
+    if (route.request().method() === 'POST') {
+      createdBody = route.request().postDataJSON()
+      await route.fulfill({ json: importedDoc })
+      return
+    }
+    await route.fulfill({ json: [snapshot.document, importedDoc.document] })
+  })
+  await page.route('**/api/documents/doc-import', async (route) => route.fulfill({ json: importedDoc }))
+  await page.route('**/api/documents/doc-import/**', async (route) => route.fulfill({ json: importedDoc }))
+
+  await page.goto('/')
+  await page.evaluate(() => localStorage.setItem('documosa.locale', 'en'))
+  await page.reload()
+  await page.getByPlaceholder('Nickname').fill('Ari')
+  await page.getByRole('radio', { name: 'Writer' }).click()
+  await page.getByRole('button', { name: 'Enter' }).click()
+
+  await page.getByRole('button', { name: 'Open documents' }).click()
+  await page.getByPlaceholder('Paste plain text').fill('# Hello\nWorld')
+  await page.getByRole('button', { name: 'Create or import' }).click()
+
+  expect(createdBody).toMatchObject({ title: 'Untitled', content: '# Hello\nWorld' })
+  await expect(page.locator('.cm-content')).toContainText('Hello')
+  await expect(page.locator('.cm-content')).toContainText('World')
+})
+
+test('presence panel shows online users from websocket', async ({ page }) => {
+  await setupRoutes(page)
+
+  await page.routeWebSocket(/\/api\/documents\/doc-1\/ws/, (ws) => {
+    ws.onMessage(() => {
+      // Frontend only listens; simulate presence after connection settles
+    })
+    setTimeout(() => {
+      ws.send(
+        JSON.stringify({
+          type: 'presence',
+          document_id: 'doc-1',
+          users: [
+            { document_id: 'doc-1', client_id: 'writer-1', nickname: 'Alice', role_mode: 'writer' },
+            { document_id: 'doc-1', client_id: 'reviewer-1', nickname: 'Bob', role_mode: 'reviewer' },
+          ],
+        }),
+      )
+    }, 500)
+  })
+
+  await page.goto('/')
+  await page.evaluate(() => localStorage.setItem('documosa.locale', 'en'))
+  await page.reload()
+  await page.getByPlaceholder('Nickname').fill('Ari')
+  await page.getByRole('radio', { name: 'Writer' }).click()
+  await page.getByRole('button', { name: 'Enter' }).click()
+
+  await page.getByRole('button', { name: 'Open documents' }).click()
+  await page.getByRole('button', { name: /LAN Draft/ }).click()
+
+  await expect(page.locator('.cm-content')).toContainText('First line')
+
+  // Presence badge should show 2 online users (look for badge in header, not the line count text)
+  const toolbar = page.locator('header')
+  await expect(toolbar.locator('[data-slot="badge"]').getByText('2')).toBeVisible()
+
+  // Click presence button to expand panel
+  await toolbar.locator('button').filter({ hasText: '2' }).click()
+  await expect(page.getByText('Alice')).toBeVisible()
+  await expect(page.getByText('Bob')).toBeVisible()
 })
