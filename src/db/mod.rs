@@ -6,6 +6,9 @@ use sqlx::SqlitePool;
 use std::str::FromStr;
 use std::time::Duration as StdDuration;
 
+mod ops;
+pub use ops::*;
+
 mod text;
 pub(crate) use text::*;
 
