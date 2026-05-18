@@ -209,9 +209,6 @@ async fn create_document(
 ) -> Result<impl IntoResponse> {
     let actor = identity_from_headers(&headers)?;
     let snapshot = db::create_document(&state.pool, &actor, body.title, body.content).await?;
-    state
-        .hub
-        .document_changed(&snapshot.document.id, "document.created");
     Ok(Json(snapshot))
 }
 
@@ -285,9 +282,7 @@ async fn update_content(
         body.base_revisions,
     )
     .await?;
-    state
-        .hub
-        .document_changed(&document_id, "document.content_updated");
+    state.hub.content_changed(&document_id);
     Ok(Json(snapshot))
 }
 
@@ -306,9 +301,7 @@ async fn put_audit_event_note(
         body.body,
     )
     .await?;
-    state
-        .hub
-        .document_changed(&document_id, "audit.note.updated");
+    state.hub.content_changed(&document_id);
     Ok(Json(snapshot))
 }
 
@@ -327,7 +320,7 @@ async fn insert_lines(
         body.content,
     )
     .await?;
-    state.hub.document_changed(&document_id, "lines.inserted");
+    state.hub.content_changed(&document_id);
     Ok(Json(snapshot))
 }
 
@@ -338,15 +331,15 @@ async fn replace_lines(
     Json(body): Json<ReplaceLinesBody>,
 ) -> Result<impl IntoResponse> {
     let actor = identity_from_headers(&headers)?;
+    let line_ids = body.line_ids;
     let snapshot = db::replace_lines(
         &state.pool,
         &actor,
         &document_id,
-        body.line_ids,
+        line_ids.clone(),
         body.content,
-    )
-    .await?;
-    state.hub.document_changed(&document_id, "lines.replaced");
+    ).await?;
+    state.hub.lines_replaced(&document_id, &line_ids);
     Ok(Json(snapshot))
 }
 
@@ -357,8 +350,9 @@ async fn delete_lines(
     Json(body): Json<DeleteLinesBody>,
 ) -> Result<impl IntoResponse> {
     let actor = identity_from_headers(&headers)?;
-    let snapshot = db::delete_lines(&state.pool, &actor, &document_id, body.line_ids).await?;
-    state.hub.document_changed(&document_id, "lines.deleted");
+    let line_ids = body.line_ids;
+    let snapshot = db::delete_lines(&state.pool, &actor, &document_id, line_ids.clone()).await?;
+    state.hub.lines_deleted(&document_id, &line_ids);
     Ok(Json(snapshot))
 }
 
@@ -370,7 +364,7 @@ async fn heartbeat_locks(
 ) -> Result<impl IntoResponse> {
     let actor = identity_from_headers(&headers)?;
     let locks = db::heartbeat_locks(&state.pool, &actor, &document_id, body.line_ids).await?;
-    state.hub.document_changed(&document_id, "locks.heartbeat");
+    state.hub.locks_changed(&document_id);
     Ok(Json(locks))
 }
 
@@ -382,7 +376,7 @@ async fn release_locks(
 ) -> Result<impl IntoResponse> {
     let actor = identity_from_headers(&headers)?;
     let locks = db::release_locks(&state.pool, &actor, &document_id, body.line_ids).await?;
-    state.hub.document_changed(&document_id, "locks.released");
+    state.hub.locks_changed(&document_id);
     Ok(Json(locks))
 }
 
@@ -406,7 +400,7 @@ async fn create_comment(
         },
     )
     .await?;
-    state.hub.document_changed(&document_id, "comment.created");
+    state.hub.comment_created(&document_id, snapshot.comments.last().unwrap().id.as_str());
     Ok(Json(snapshot))
 }
 
@@ -419,7 +413,7 @@ async fn update_comment(
     let actor = identity_from_headers(&headers)?;
     let snapshot =
         db::update_comment(&state.pool, &actor, &document_id, &comment_id, body.body).await?;
-    state.hub.document_changed(&document_id, "comment.updated");
+    state.hub.content_changed(&document_id);
     Ok(Json(snapshot))
 }
 
@@ -430,7 +424,7 @@ async fn delete_comment(
 ) -> Result<impl IntoResponse> {
     let actor = identity_from_headers(&headers)?;
     let snapshot = db::delete_comment(&state.pool, &actor, &document_id, &comment_id).await?;
-    state.hub.document_changed(&document_id, "comment.deleted");
+    state.hub.content_changed(&document_id);
     Ok(Json(snapshot))
 }
 
@@ -443,7 +437,7 @@ async fn reply_comment(
     let actor = identity_from_headers(&headers)?;
     let snapshot =
         db::reply_comment(&state.pool, &actor, &document_id, &comment_id, body.body).await?;
-    state.hub.document_changed(&document_id, "comment.replied");
+    state.hub.content_changed(&document_id);
     Ok(Json(snapshot))
 }
 
@@ -454,7 +448,7 @@ async fn resolve_comment(
 ) -> Result<impl IntoResponse> {
     let actor = identity_from_headers(&headers)?;
     let snapshot = db::resolve_comment(&state.pool, &actor, &document_id, &comment_id).await?;
-    state.hub.document_changed(&document_id, "comment.resolved");
+    state.hub.comment_resolved(&document_id, &comment_id);
     Ok(Json(snapshot))
 }
 
@@ -476,9 +470,7 @@ async fn create_suggestion(
         body.content,
     )
     .await?;
-    state
-        .hub
-        .document_changed(&document_id, "suggestion.created");
+    state.hub.suggestion_created(&document_id, snapshot.suggestions.last().unwrap().id.as_str());
     Ok(Json(snapshot))
 }
 
@@ -490,9 +482,7 @@ async fn accept_suggestion(
     let actor = identity_from_headers(&headers)?;
     let snapshot =
         db::decide_suggestion(&state.pool, &actor, &document_id, &suggestion_id, true).await?;
-    state
-        .hub
-        .document_changed(&document_id, "suggestion.accepted");
+    state.hub.suggestion_decided(&document_id, &suggestion_id, true);
     Ok(Json(snapshot))
 }
 
@@ -504,9 +494,7 @@ async fn reject_suggestion(
     let actor = identity_from_headers(&headers)?;
     let snapshot =
         db::decide_suggestion(&state.pool, &actor, &document_id, &suggestion_id, false).await?;
-    state
-        .hub
-        .document_changed(&document_id, "suggestion.rejected");
+    state.hub.suggestion_decided(&document_id, &suggestion_id, false);
     Ok(Json(snapshot))
 }
 
