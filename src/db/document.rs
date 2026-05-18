@@ -12,7 +12,7 @@ pub async fn create_document(
     title: String,
     content: String,
 ) -> Result<DocumentSnapshot> {
-    let mut tx = super::begin_write_tx(pool).await?;
+    let mut tx = super::audit::begin_write_tx(pool).await?;
     let timestamp = now();
     let document = Document {
         id: new_id(),
@@ -29,7 +29,7 @@ pub async fn create_document(
         .await?;
     let lines = split_lines_preserve_trailing(&content);
     for (index, line) in lines.iter().enumerate() {
-        super::insert_line_at(
+        super::line::insert_line_at(
             &mut tx,
             &document.id,
             (index as i64 + 1) * super::LINE_ORDER_STEP,
@@ -37,7 +37,7 @@ pub async fn create_document(
         )
         .await?;
     }
-    super::audit_tx(
+    super::audit::audit_tx(
         &mut tx,
         &document.id,
         actor,
@@ -68,7 +68,7 @@ pub async fn update_document_title(
     document_id: &str,
     title: &str,
 ) -> Result<()> {
-    let mut tx = super::begin_write_tx(pool).await?;
+    let mut tx = super::audit::begin_write_tx(pool).await?;
     let timestamp = now();
     sqlx::query("UPDATE documents SET title = ?, updated_at = ? WHERE id = ?")
         .bind(title)
@@ -76,7 +76,7 @@ pub async fn update_document_title(
         .bind(document_id)
         .execute(&mut *tx)
         .await?;
-    super::audit_tx(
+    super::audit::audit_tx(
         &mut tx,
         document_id,
         actor,
