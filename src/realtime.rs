@@ -23,9 +23,45 @@ pub enum ServerEvent {
         document_id: String,
         users: Vec<Presence>,
     },
-    DocumentChanged {
+    LinesInserted {
         document_id: String,
-        topic: String,
+        line_ids: Vec<String>,
+        after_line_id: Option<String>,
+    },
+    LinesReplaced {
+        document_id: String,
+        line_ids: Vec<String>,
+    },
+    LinesDeleted {
+        document_id: String,
+        line_ids: Vec<String>,
+    },
+    CommentCreated {
+        document_id: String,
+        comment_id: String,
+    },
+    CommentResolved {
+        document_id: String,
+        comment_id: String,
+    },
+    SuggestionCreated {
+        document_id: String,
+        suggestion_id: String,
+    },
+    SuggestionDecided {
+        document_id: String,
+        suggestion_id: String,
+        accepted: bool,
+    },
+    DocumentTitleUpdated {
+        document_id: String,
+        title: String,
+    },
+    LocksChanged {
+        document_id: String,
+    },
+    ContentChanged {
+        document_id: String,
     },
 }
 
@@ -48,10 +84,73 @@ impl EventHub {
         self.tx.subscribe()
     }
 
-    pub fn document_changed(&self, document_id: &str, topic: &str) {
-        let _ = self.tx.send(ServerEvent::DocumentChanged {
+    pub fn lines_inserted(&self, document_id: &str, line_ids: &[String], after_line_id: Option<&str>) {
+        let _ = self.tx.send(ServerEvent::LinesInserted {
             document_id: document_id.to_string(),
-            topic: topic.to_string(),
+            line_ids: line_ids.to_vec(),
+            after_line_id: after_line_id.map(str::to_string),
+        });
+    }
+
+    pub fn lines_replaced(&self, document_id: &str, line_ids: &[String]) {
+        let _ = self.tx.send(ServerEvent::LinesReplaced {
+            document_id: document_id.to_string(),
+            line_ids: line_ids.to_vec(),
+        });
+    }
+
+    pub fn lines_deleted(&self, document_id: &str, line_ids: &[String]) {
+        let _ = self.tx.send(ServerEvent::LinesDeleted {
+            document_id: document_id.to_string(),
+            line_ids: line_ids.to_vec(),
+        });
+    }
+
+    pub fn comment_created(&self, document_id: &str, comment_id: &str) {
+        let _ = self.tx.send(ServerEvent::CommentCreated {
+            document_id: document_id.to_string(),
+            comment_id: comment_id.to_string(),
+        });
+    }
+
+    pub fn comment_resolved(&self, document_id: &str, comment_id: &str) {
+        let _ = self.tx.send(ServerEvent::CommentResolved {
+            document_id: document_id.to_string(),
+            comment_id: comment_id.to_string(),
+        });
+    }
+
+    pub fn suggestion_created(&self, document_id: &str, suggestion_id: &str) {
+        let _ = self.tx.send(ServerEvent::SuggestionCreated {
+            document_id: document_id.to_string(),
+            suggestion_id: suggestion_id.to_string(),
+        });
+    }
+
+    pub fn suggestion_decided(&self, document_id: &str, suggestion_id: &str, accepted: bool) {
+        let _ = self.tx.send(ServerEvent::SuggestionDecided {
+            document_id: document_id.to_string(),
+            suggestion_id: suggestion_id.to_string(),
+            accepted,
+        });
+    }
+
+    pub fn title_updated(&self, document_id: &str, title: &str) {
+        let _ = self.tx.send(ServerEvent::DocumentTitleUpdated {
+            document_id: document_id.to_string(),
+            title: title.to_string(),
+        });
+    }
+
+    pub fn locks_changed(&self, document_id: &str) {
+        let _ = self.tx.send(ServerEvent::LocksChanged {
+            document_id: document_id.to_string(),
+        });
+    }
+
+    pub fn content_changed(&self, document_id: &str) {
+        let _ = self.tx.send(ServerEvent::ContentChanged {
+            document_id: document_id.to_string(),
         });
     }
 
@@ -107,8 +206,17 @@ pub async fn websocket(socket: WebSocket, hub: EventHub, document_id: String, id
     let write_task = tokio::spawn(async move {
         while let Ok(event) = rx.recv().await {
             let event_doc = match &event {
-                ServerEvent::Presence { document_id, .. } => document_id,
-                ServerEvent::DocumentChanged { document_id, .. } => document_id,
+                ServerEvent::Presence { document_id, .. }
+                | ServerEvent::LinesInserted { document_id, .. }
+                | ServerEvent::LinesReplaced { document_id, .. }
+                | ServerEvent::LinesDeleted { document_id, .. }
+                | ServerEvent::CommentCreated { document_id, .. }
+                | ServerEvent::CommentResolved { document_id, .. }
+                | ServerEvent::SuggestionCreated { document_id, .. }
+                | ServerEvent::SuggestionDecided { document_id, .. }
+                | ServerEvent::DocumentTitleUpdated { document_id, .. }
+                | ServerEvent::LocksChanged { document_id }
+                | ServerEvent::ContentChanged { document_id } => document_id,
             };
             if event_doc == &writer_doc
                 && let Ok(text) = serde_json::to_string(&event)
