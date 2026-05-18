@@ -14,7 +14,7 @@ pub async fn update_content(
     content: String,
     base_revisions: Vec<BaseRevision>,
 ) -> Result<DocumentSnapshot> {
-    require_writer(actor)?;
+    super::require_permission(actor, "replace_lines")?;
     let mut tx = super::audit::begin_write_tx(pool).await?;
     let current = active_lines_tx(&mut tx, document_id).await?;
     if current.len() != base_revisions.len()
@@ -146,7 +146,7 @@ pub async fn insert_lines(
     after_line_id: Option<String>,
     content: Vec<String>,
 ) -> Result<DocumentSnapshot> {
-    require_writer(actor)?;
+    super::require_permission(actor, "insert_lines")?;
     if content.is_empty() {
         return Err(AppError::BadRequest("at least one line is required".into()));
     }
@@ -201,7 +201,7 @@ pub async fn replace_lines(
     line_ids: Vec<String>,
     content: Vec<String>,
 ) -> Result<DocumentSnapshot> {
-    require_writer(actor)?;
+    super::require_permission(actor, "replace_lines")?;
     if line_ids.is_empty() || line_ids.len() != content.len() {
         return Err(AppError::BadRequest(
             "line_ids and content must be non-empty and equal length".into(),
@@ -259,7 +259,7 @@ pub async fn delete_lines(
     document_id: &str,
     line_ids: Vec<String>,
 ) -> Result<DocumentSnapshot> {
-    require_writer(actor)?;
+    super::require_permission(actor, "delete_lines")?;
     if line_ids.is_empty() {
         return Err(AppError::BadRequest("line_ids are required".into()));
     }
@@ -498,11 +498,3 @@ pub(super) async fn line_range_tx(
     Ok(rows.into_iter().map(|row| row.0).collect())
 }
 
-pub(super) fn require_writer(actor: &Identity) -> Result<()> {
-    if actor.role_mode != RoleMode::Writer {
-        return Err(AppError::Forbidden(
-            "this operation requires writer mode".into(),
-        ));
-    }
-    Ok(())
-}

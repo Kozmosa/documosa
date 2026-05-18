@@ -69,7 +69,7 @@ pub async fn decide_suggestion(
     suggestion_id: &str,
     accept: bool,
 ) -> Result<DocumentSnapshot> {
-    super::line::require_writer(actor)?;
+    super::require_permission(actor, if accept { "accept_suggestion" } else { "reject_suggestion" })?;
     let mut tx = super::audit::begin_write_tx(pool).await?;
     let suggestion = sqlx::query_as::<_, Suggestion>(
         "SELECT id, document_id, kind, anchor_line_id, start_line_id, end_line_id, content_json, base_revisions_json, state, author_client_id, author_nickname, role_mode, created_at, decided_by_client_id, decided_by_nickname, decided_at FROM suggestions WHERE id = ? AND document_id = ?",

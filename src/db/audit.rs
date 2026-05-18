@@ -4,6 +4,7 @@ use sqlx::{SqlitePool, Transaction, Sqlite};
 
 use crate::error::Result;
 use crate::models::{now, new_id, Identity};
+use documosa_core::identity::ActorKind;
 
 pub(crate) async fn begin_write_tx(pool: &SqlitePool) -> Result<Transaction<'_, Sqlite>> {
     Ok(pool.begin_with("BEGIN IMMEDIATE").await?)
@@ -40,6 +41,23 @@ pub(crate) async fn audit_tx(
     event_type: &str,
     details: Value,
 ) -> Result<()> {
+    let enriched_details = match &actor.actor_kind {
+        ActorKind::Agent { agent_id, session_ref, task_ref } => {
+            let mut d = details;
+            if let Some(obj) = d.as_object_mut() {
+                obj.insert("actor_kind".into(), serde_json::json!("agent"));
+                obj.insert("agent_id".into(), serde_json::json!(agent_id));
+                if let Some(sr) = session_ref {
+                    obj.insert("session_ref".into(), serde_json::json!(sr));
+                }
+                if let Some(tr) = task_ref {
+                    obj.insert("task_ref".into(), serde_json::json!(tr));
+                }
+            }
+            d
+        }
+        ActorKind::Human => details,
+    };
     let audit_event_id = new_id();
     let timestamp = now();
     sqlx::query("INSERT INTO audit_events (id, document_id, actor_client_id, actor_nickname, role_mode, event_type, details_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
@@ -49,7 +67,7 @@ pub(crate) async fn audit_tx(
         .bind(&actor.nickname)
         .bind(actor.role_mode.as_str())
         .bind(event_type)
-        .bind(serde_json::to_string(&details)?)
+        .bind(serde_json::to_string(&enriched_details)?)
         .bind(&timestamp)
         .execute(&mut **tx)
         .await?;

@@ -202,7 +202,7 @@ pub async fn resolve_comment(
     document_id: &str,
     comment_id: &str,
 ) -> Result<DocumentSnapshot> {
-    super::line::require_writer(actor)?;
+    super::require_permission(actor, "resolve_comment")?;
     let mut tx = super::audit::begin_write_tx(pool).await?;
     let existing = get_comment_tx(&mut tx, document_id, comment_id).await?;
     let timestamp = now();

@@ -12,6 +12,9 @@ pub(crate) use text::*;
 mod audit;
 pub(crate) use audit::{audit_tx, begin_write_tx, touch_document_tx, prune_expired_locks_tx};
 
+mod permission;
+pub(crate) use permission::require_permission;
+
 mod document;
 pub use document::{
     create_document, export_document, list_documents, snapshot, update_document_title,
