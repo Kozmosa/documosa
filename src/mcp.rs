@@ -124,9 +124,6 @@ async fn call_tool(state: &AppState, name: &str, args: Value) -> Result<Value> {
                 .unwrap_or("")
                 .to_string();
             let snap = db::create_document(&state.pool, &actor, title, content).await?;
-            state
-                .hub
-                .document_changed(&snap.document.id, "document.created");
             (json!(snap), None)
         }
         "get_document" => (
@@ -180,9 +177,7 @@ async fn call_tool(state: &AppState, name: &str, args: Value) -> Result<Value> {
                 string_arg(&args, "body")?,
             )
             .await?;
-            state
-                .hub
-                .document_changed(&document_id, "audit.note.updated");
+            state.hub.content_changed(&document_id);
             (json!(snap), None)
         }
         "clear_audit_event_note" => {
@@ -195,9 +190,7 @@ async fn call_tool(state: &AppState, name: &str, args: Value) -> Result<Value> {
                 String::new(),
             )
             .await?;
-            state
-                .hub
-                .document_changed(&document_id, "audit.note.updated");
+            state.hub.content_changed(&document_id);
             (json!(snap), None)
         }
         "insert_lines" => {
@@ -208,32 +201,32 @@ async fn call_tool(state: &AppState, name: &str, args: Value) -> Result<Value> {
                 .and_then(Value::as_str)
                 .map(str::to_string);
             let snap = db::insert_lines(&state.pool, &actor, &document_id, after, content).await?;
-            state.hub.document_changed(&document_id, "lines.inserted");
+            state.hub.content_changed(&document_id);
             (json!(snap), None)
         }
         "replace_lines" => {
             let document_id = string_arg(&args, "document_id")?;
+            let line_ids = string_vec_arg(&args, "line_ids")?;
             let snap = db::replace_lines(
                 &state.pool,
                 &actor,
                 &document_id,
-                string_vec_arg(&args, "line_ids")?,
+                line_ids.clone(),
                 string_vec_arg(&args, "content")?,
-            )
-            .await?;
-            state.hub.document_changed(&document_id, "lines.replaced");
+            ).await?;
+            state.hub.lines_replaced(&document_id, &line_ids);
             (json!(snap), None)
         }
         "delete_lines" => {
             let document_id = string_arg(&args, "document_id")?;
+            let line_ids = string_vec_arg(&args, "line_ids")?;
             let snap = db::delete_lines(
                 &state.pool,
                 &actor,
                 &document_id,
-                string_vec_arg(&args, "line_ids")?,
-            )
-            .await?;
-            state.hub.document_changed(&document_id, "lines.deleted");
+                line_ids.clone(),
+            ).await?;
+            state.hub.lines_deleted(&document_id, &line_ids);
             (json!(snap), None)
         }
         "comment_on_range" => {
@@ -251,7 +244,7 @@ async fn call_tool(state: &AppState, name: &str, args: Value) -> Result<Value> {
                 },
             )
             .await?;
-            state.hub.document_changed(&document_id, "comment.created");
+            state.hub.comment_created(&document_id, snap.comments.last().unwrap().id.as_str());
             (json!(snap), None)
         }
         "reply_comment" => {
@@ -264,7 +257,7 @@ async fn call_tool(state: &AppState, name: &str, args: Value) -> Result<Value> {
                 string_arg(&args, "body")?,
             )
             .await?;
-            state.hub.document_changed(&document_id, "comment.replied");
+            state.hub.content_changed(&document_id);
             (json!(snap), None)
         }
         "resolve_comment" => {
@@ -276,7 +269,7 @@ async fn call_tool(state: &AppState, name: &str, args: Value) -> Result<Value> {
                 &string_arg(&args, "comment_id")?,
             )
             .await?;
-            state.hub.document_changed(&document_id, "comment.resolved");
+            state.hub.comment_resolved(&document_id, &string_arg(&args, "comment_id")?);
             (json!(snap), None)
         }
         "suggest_change" => {
@@ -301,9 +294,7 @@ async fn call_tool(state: &AppState, name: &str, args: Value) -> Result<Value> {
                     .unwrap_or_default(),
             )
             .await?;
-            state
-                .hub
-                .document_changed(&document_id, "suggestion.created");
+            state.hub.suggestion_created(&document_id, snap.suggestions.last().unwrap().id.as_str());
             (json!(snap), None)
         }
         "accept_suggestion" | "reject_suggestion" => {
@@ -317,14 +308,7 @@ async fn call_tool(state: &AppState, name: &str, args: Value) -> Result<Value> {
                 accept,
             )
             .await?;
-            state.hub.document_changed(
-                &document_id,
-                if accept {
-                    "suggestion.accepted"
-                } else {
-                    "suggestion.rejected"
-                },
-            );
+            state.hub.suggestion_decided(&document_id, &string_arg(&args, "suggestion_id")?, accept);
             (json!(snap), None)
         }
         _ => return Err(AppError::BadRequest(format!("unknown tool {name}"))),
