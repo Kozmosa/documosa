@@ -10,10 +10,8 @@ mod ops;
 pub use ops::*;
 
 mod text;
-pub(crate) use text::*;
 
 mod audit;
-pub(crate) use audit::{audit_tx, begin_write_tx, touch_document_tx, prune_expired_locks_tx};
 
 mod permission;
 pub(crate) use permission::require_permission;
@@ -40,9 +38,6 @@ pub use suggestion::{create_suggestion, decide_suggestion};
 mod history;
 pub use history::{history_diff, list_history_events, put_audit_event_note};
 
-pub(crate) use line::{
-    active_lines_tx, ensure_line_exists_tx, get_line_tx, insert_line_at,
-};
 
 use crate::error::Result;
 
