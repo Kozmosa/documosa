@@ -160,6 +160,18 @@ type BaseRevision = {
   revision: number
 }
 
+type WsEvent = {
+  type: string
+  document_id: string
+  users?: PresenceUser[]
+  line_ids?: string[]
+  after_line_id?: string | null
+  comment_id?: string
+  suggestion_id?: string
+  accepted?: boolean
+  title?: string
+}
+
 const API = ''
 const CherryEditor = lazy(() => import('./CherryEditor'))
 const COMMENTS_OPEN_KEY = 'documosa.comments_open'
@@ -812,32 +824,45 @@ function App() {
     const url = `${scheme}://${location.host}/api/documents/${snapshot.document.id}/ws?client_id=${encodeURIComponent(identity.clientId)}&nickname=${encodeURIComponent(identity.nickname)}&role_mode=${identity.roleMode}`
     const socket = new WebSocket(url)
     socket.onmessage = (message) => {
-      let topic = ''
-      try {
-        const event = JSON.parse(message.data) as { type?: string; topic?: string; users?: PresenceUser[] }
-        if (event.type === 'document_changed') topic = event.topic ?? ''
-        if (event.type === 'presence' && event.users) {
-          setOnlineUsers(event.users)
+      let event: WsEvent
+      try { event = JSON.parse(message.data) as WsEvent } catch { return }
+
+      switch (event.type) {
+        case 'presence':
+          if (event.users) setOnlineUsers(event.users)
           return
-        }
-      } catch {
-        topic = ''
-      }
-      void request<Snapshot>(`/api/documents/${snapshot.document.id}`)
-        .then((next) => {
-          void refreshDocuments().catch(() => undefined)
-          if (topic === 'audit.note.updated') {
-            applySnapshot(next, false)
-            return
-          }
+
+        case 'comment_created':
+        case 'comment_resolved':
+        case 'suggestion_created':
+        case 'suggestion_decided':
+        case 'document_title_updated':
+        case 'locks_changed':
+        case 'content_changed':
+          void request<Snapshot>(`/api/documents/${snapshot.document.id}`)
+            .then((next) => {
+              void refreshDocuments().catch(() => undefined)
+              applySnapshot(next, false)
+            })
+            .catch((error) => setStatus(error.message))
+          return
+
+        case 'lines_inserted':
+        case 'lines_replaced':
+        case 'lines_deleted':
           if (dirtyRef.current) {
             setRemoteConflict(true)
             setStatus(t('conflict.message'))
             return
           }
-          applySnapshot(next, true)
-        })
-        .catch((error) => setStatus(error.message))
+          void request<Snapshot>(`/api/documents/${snapshot.document.id}`)
+            .then((next) => {
+              void refreshDocuments().catch(() => undefined)
+              applySnapshot(next, true)
+            })
+            .catch((error) => setStatus(error.message))
+          return
+      }
     }
     return () => socket.close()
   }, [applySnapshot, identity, refreshDocuments, request, snapshot, t])
