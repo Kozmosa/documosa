@@ -24,6 +24,7 @@ fn actor(client_id: &str, role_mode: RoleMode) -> Identity {
         client_id: client_id.to_string(),
         nickname: client_id.to_string(),
         role_mode,
+        actor_kind: Default::default(),
     }
 }
 

@@ -57,6 +57,7 @@ impl<S: Send + Sync> FromRequestParts<S> for MmdashIdentity {
             client_id: format!("mmdash-{}", claims.sub),
             nickname,
             role_mode: RoleMode::Writer,
+            actor_kind: Default::default(),
         }))
     }
 }

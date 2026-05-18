@@ -14,6 +14,32 @@ use crate::models::{BaseRevision, HistoryCategory, HistoryListOptions, Identity,
 use crate::mmdash_api;
 use crate::realtime;
 
+fn identity_from_headers(headers: &HeaderMap) -> Result<Identity> {
+    let client_id = header_str(headers, "x-documosa-client-id")?;
+    let nickname = header_str(headers, "x-documosa-nickname")?;
+    let role_mode = RoleMode::parse(&header_str(headers, "x-documosa-role-mode")?)?;
+    if client_id.trim().is_empty() || nickname.trim().is_empty() {
+        return Err(AppError::BadRequest(
+            "client id and nickname are required".into(),
+        ));
+    }
+    Ok(Identity {
+        client_id,
+        nickname,
+        role_mode,
+        actor_kind: Default::default(),
+    })
+}
+
+fn header_str(headers: &HeaderMap, name: &str) -> Result<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| AppError::BadRequest(format!("missing {name} header")))
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/health", get(|| async { "ok" }))
@@ -181,7 +207,7 @@ async fn create_document(
     headers: HeaderMap,
     Json(body): Json<CreateDocumentBody>,
 ) -> Result<impl IntoResponse> {
-    let actor = Identity::from_headers(&headers)?;
+    let actor = identity_from_headers(&headers)?;
     let snapshot = db::create_document(&state.pool, &actor, body.title, body.content).await?;
     state
         .hub
@@ -250,7 +276,7 @@ async fn update_content(
     Path(document_id): Path<String>,
     Json(body): Json<UpdateContentBody>,
 ) -> Result<impl IntoResponse> {
-    let actor = Identity::from_headers(&headers)?;
+    let actor = identity_from_headers(&headers)?;
     let snapshot = db::update_content(
         &state.pool,
         &actor,
@@ -271,7 +297,7 @@ async fn put_audit_event_note(
     Path((document_id, audit_event_id)): Path<(String, String)>,
     Json(body): Json<AuditEventNoteBody>,
 ) -> Result<impl IntoResponse> {
-    let actor = Identity::from_headers(&headers)?;
+    let actor = identity_from_headers(&headers)?;
     let snapshot = db::put_audit_event_note(
         &state.pool,
         &actor,
@@ -292,7 +318,7 @@ async fn insert_lines(
     Path(document_id): Path<String>,
     Json(body): Json<InsertLinesBody>,
 ) -> Result<impl IntoResponse> {
-    let actor = Identity::from_headers(&headers)?;
+    let actor = identity_from_headers(&headers)?;
     let snapshot = db::insert_lines(
         &state.pool,
         &actor,
@@ -311,7 +337,7 @@ async fn replace_lines(
     Path(document_id): Path<String>,
     Json(body): Json<ReplaceLinesBody>,
 ) -> Result<impl IntoResponse> {
-    let actor = Identity::from_headers(&headers)?;
+    let actor = identity_from_headers(&headers)?;
     let snapshot = db::replace_lines(
         &state.pool,
         &actor,
@@ -330,7 +356,7 @@ async fn delete_lines(
     Path(document_id): Path<String>,
     Json(body): Json<DeleteLinesBody>,
 ) -> Result<impl IntoResponse> {
-    let actor = Identity::from_headers(&headers)?;
+    let actor = identity_from_headers(&headers)?;
     let snapshot = db::delete_lines(&state.pool, &actor, &document_id, body.line_ids).await?;
     state.hub.document_changed(&document_id, "lines.deleted");
     Ok(Json(snapshot))
@@ -342,7 +368,7 @@ async fn heartbeat_locks(
     Path(document_id): Path<String>,
     Json(body): Json<LockBody>,
 ) -> Result<impl IntoResponse> {
-    let actor = Identity::from_headers(&headers)?;
+    let actor = identity_from_headers(&headers)?;
     let locks = db::heartbeat_locks(&state.pool, &actor, &document_id, body.line_ids).await?;
     state.hub.document_changed(&document_id, "locks.heartbeat");
     Ok(Json(locks))
@@ -354,7 +380,7 @@ async fn release_locks(
     Path(document_id): Path<String>,
     Json(body): Json<LockBody>,
 ) -> Result<impl IntoResponse> {
-    let actor = Identity::from_headers(&headers)?;
+    let actor = identity_from_headers(&headers)?;
     let locks = db::release_locks(&state.pool, &actor, &document_id, body.line_ids).await?;
     state.hub.document_changed(&document_id, "locks.released");
     Ok(Json(locks))
@@ -366,7 +392,7 @@ async fn create_comment(
     Path(document_id): Path<String>,
     Json(body): Json<CommentBody>,
 ) -> Result<impl IntoResponse> {
-    let actor = Identity::from_headers(&headers)?;
+    let actor = identity_from_headers(&headers)?;
     let snapshot = db::create_comment(
         &state.pool,
         &actor,
@@ -390,7 +416,7 @@ async fn update_comment(
     Path((document_id, comment_id)): Path<(String, String)>,
     Json(body): Json<UpdateCommentBody>,
 ) -> Result<impl IntoResponse> {
-    let actor = Identity::from_headers(&headers)?;
+    let actor = identity_from_headers(&headers)?;
     let snapshot =
         db::update_comment(&state.pool, &actor, &document_id, &comment_id, body.body).await?;
     state.hub.document_changed(&document_id, "comment.updated");
@@ -402,7 +428,7 @@ async fn delete_comment(
     headers: HeaderMap,
     Path((document_id, comment_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse> {
-    let actor = Identity::from_headers(&headers)?;
+    let actor = identity_from_headers(&headers)?;
     let snapshot = db::delete_comment(&state.pool, &actor, &document_id, &comment_id).await?;
     state.hub.document_changed(&document_id, "comment.deleted");
     Ok(Json(snapshot))
@@ -414,7 +440,7 @@ async fn reply_comment(
     Path((document_id, comment_id)): Path<(String, String)>,
     Json(body): Json<ReplyBody>,
 ) -> Result<impl IntoResponse> {
-    let actor = Identity::from_headers(&headers)?;
+    let actor = identity_from_headers(&headers)?;
     let snapshot =
         db::reply_comment(&state.pool, &actor, &document_id, &comment_id, body.body).await?;
     state.hub.document_changed(&document_id, "comment.replied");
@@ -426,7 +452,7 @@ async fn resolve_comment(
     headers: HeaderMap,
     Path((document_id, comment_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse> {
-    let actor = Identity::from_headers(&headers)?;
+    let actor = identity_from_headers(&headers)?;
     let snapshot = db::resolve_comment(&state.pool, &actor, &document_id, &comment_id).await?;
     state.hub.document_changed(&document_id, "comment.resolved");
     Ok(Json(snapshot))
@@ -438,7 +464,7 @@ async fn create_suggestion(
     Path(document_id): Path<String>,
     Json(body): Json<SuggestionBody>,
 ) -> Result<impl IntoResponse> {
-    let actor = Identity::from_headers(&headers)?;
+    let actor = identity_from_headers(&headers)?;
     let snapshot = db::create_suggestion(
         &state.pool,
         &actor,
@@ -461,7 +487,7 @@ async fn accept_suggestion(
     headers: HeaderMap,
     Path((document_id, suggestion_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse> {
-    let actor = Identity::from_headers(&headers)?;
+    let actor = identity_from_headers(&headers)?;
     let snapshot =
         db::decide_suggestion(&state.pool, &actor, &document_id, &suggestion_id, true).await?;
     state
@@ -475,7 +501,7 @@ async fn reject_suggestion(
     headers: HeaderMap,
     Path((document_id, suggestion_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse> {
-    let actor = Identity::from_headers(&headers)?;
+    let actor = identity_from_headers(&headers)?;
     let snapshot =
         db::decide_suggestion(&state.pool, &actor, &document_id, &suggestion_id, false).await?;
     state
@@ -494,6 +520,7 @@ async fn ws(
         client_id: query.client_id,
         nickname: query.nickname,
         role_mode: RoleMode::parse(&query.role_mode)?,
+        actor_kind: Default::default(),
     };
     if identity.client_id.trim().is_empty() || identity.nickname.trim().is_empty() {
         return Err(AppError::BadRequest(

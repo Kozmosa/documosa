@@ -1,10 +1,13 @@
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use documosa_core::error::ProtocolError;
 use serde::Serialize;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
+    #[error("{0}")]
+    Protocol(#[from] ProtocolError),
     #[error("{0}")]
     BadRequest(String),
     #[error("{0}")]
@@ -35,6 +38,10 @@ struct ErrorBody {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let status = match &self {
+            AppError::Protocol(ProtocolError::BadRequest(_)) => StatusCode::BAD_REQUEST,
+            AppError::Protocol(ProtocolError::Forbidden(_)) => StatusCode::FORBIDDEN,
+            AppError::Protocol(ProtocolError::Conflict(_)) => StatusCode::CONFLICT,
+            AppError::Protocol(ProtocolError::NotFound) => StatusCode::NOT_FOUND,
             AppError::BadRequest(_) => StatusCode::BAD_REQUEST,
             AppError::Forbidden(_) => StatusCode::FORBIDDEN,
             AppError::Conflict(_) => StatusCode::CONFLICT,
@@ -46,9 +53,12 @@ impl IntoResponse for AppError {
             }
         };
         let error = self.to_string();
-        let message = match self {
+        let message = match &self {
+            AppError::Protocol(ProtocolError::BadRequest(msg))
+            | AppError::Protocol(ProtocolError::Forbidden(msg))
+            | AppError::Protocol(ProtocolError::Conflict(msg)) => Some(msg.clone()),
             AppError::BadRequest(msg) | AppError::Forbidden(msg) | AppError::Conflict(msg) => {
-                Some(msg)
+                Some(msg.clone())
             }
             AppError::Unauthorized => Some("invalid token".into()),
             _ => None,

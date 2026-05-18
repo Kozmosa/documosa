@@ -379,6 +379,33 @@ fn enum_schema(values: &[&str]) -> Value {
 }
 
 fn actor_from_args(args: &Value) -> Result<Identity> {
+    let actor_kind = match args
+        .get("actor_kind")
+        .and_then(Value::as_str)
+        .unwrap_or("human")
+    {
+        "agent" => {
+            let agent_id = args
+                .get("agent_id")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+                .to_string();
+            let session_ref = args
+                .get("session_ref")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            let task_ref = args
+                .get("task_ref")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            documosa_core::identity::ActorKind::Agent {
+                agent_id,
+                session_ref,
+                task_ref,
+            }
+        }
+        _ => documosa_core::identity::ActorKind::Human,
+    };
     Ok(Identity {
         client_id: args
             .get("client_id")
@@ -395,6 +422,7 @@ fn actor_from_args(args: &Value) -> Result<Identity> {
                 .and_then(Value::as_str)
                 .unwrap_or("reviewer"),
         )?,
+        actor_kind,
     })
 }
 
