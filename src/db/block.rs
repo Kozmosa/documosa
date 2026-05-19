@@ -189,6 +189,12 @@ pub async fn update_block(
     let mut tx = begin_write_tx(pool).await?;
     let block = get_block_tx(&mut tx, block_id).await?;
     let page_id = block.page_id.clone();
+
+    {
+        let bid = block_id.to_string();
+        super::lock::ensure_unlocked_tx(&mut tx, actor, &page_id, std::slice::from_ref(&bid)).await?;
+    }
+
     let timestamp = now();
 
     let mut updated = false;
@@ -262,6 +268,12 @@ pub async fn delete_block(
     let mut tx = begin_write_tx(pool).await?;
     let block = get_block_tx(&mut tx, block_id).await?;
     let page_id = block.page_id.clone();
+
+    {
+        let bid = block_id.to_string();
+        super::lock::ensure_unlocked_tx(&mut tx, actor, &page_id, std::slice::from_ref(&bid)).await?;
+    }
+
     let timestamp = now();
 
     let affected = sqlx::query(

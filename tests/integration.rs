@@ -12,6 +12,7 @@ use axum::http::{Method, Request, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::any;
 use axum::{Json, Router};
+use documosa::error::AppError;
 use documosa::models::*;
 use documosa::db::{BlockInput, CommentDraft};
 use reqwest::Client;
@@ -2138,6 +2139,45 @@ async fn page_creation_with_multiple_blocks() {
         .await
         .unwrap();
     assert!(markdown.contains("Multi-block"));
+}
+
+#[tokio::test]
+async fn lock_bypass_test() {
+    let pool = pool().await;
+    let writer_a = actor("writer-a", RoleMode::Writer);
+    let writer_b = actor("writer-b", RoleMode::Writer);
+
+    let created = documosa::db::create_page(
+        &pool,
+        &writer_a,
+        "Lock Test".to_string(),
+        make_blocks_json(&["block one"]),
+    )
+    .await
+    .unwrap();
+    let page_id = created.page.id;
+    let block_id = created.blocks[0].id.clone();
+
+    // Writer A locks the block
+    documosa::db::heartbeat_locks(&pool, &writer_a, &page_id, vec![block_id.clone()])
+        .await
+        .unwrap();
+
+    // Writer B tries to update the block -> should fail with Conflict
+    let result = documosa::db::update_block(
+        &pool,
+        &writer_b,
+        &block_id,
+        None,
+        Some(&rich_text_json("bypass attempt")),
+        None,
+    )
+    .await;
+
+    assert!(matches!(
+        result,
+        Err(AppError::Conflict(_))
+    ));
 }
 
 // ─── mmdash adapter integration tests ───────────────────────────────
