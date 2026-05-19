@@ -267,7 +267,7 @@ async fn call_tool(state: &AppState, name: &str, args: Value) -> Result<Value> {
                 serde_json::from_str(&blocks_str)?
             };
 
-            let snap = db::append_blocks(
+            let blocks = db::append_blocks(
                 &state.pool,
                 &actor,
                 &page_id,
@@ -275,7 +275,9 @@ async fn call_tool(state: &AppState, name: &str, args: Value) -> Result<Value> {
                 after,
             )
             .await?;
-            state.hub.block_inserted(&page_id, &[], after);
+            let ids: Vec<String> = blocks.iter().map(|b| b.id.clone()).collect();
+            state.hub.block_inserted(&page_id, &ids, after);
+            let snap = db::snapshot(&state.pool, &page_id).await?;
             (json!(snap), None)
         }
         "block_update" => {

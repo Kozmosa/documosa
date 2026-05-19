@@ -142,7 +142,14 @@ async fn append_blocks(
             properties_json: c.properties_json,
         })
         .collect();
-    let snap = db::append_blocks(&state.pool, &actor, &page_id, block_inputs, body.after.as_deref()).await?;
-    state.hub.block_inserted(&page_id, &[], body.after.as_deref());
-    Ok(Json(wrap_object("page", snap)))
+    let blocks = db::append_blocks(&state.pool, &actor, &page_id, block_inputs, body.after.as_deref()).await?;
+    let ids: Vec<String> = blocks.iter().map(|b| b.id.clone()).collect();
+    state.hub.block_inserted(&page_id, &ids, body.after.as_deref());
+
+    let mut map = serde_json::Map::new();
+    map.insert("object".into(), serde_json::json!("list"));
+    map.insert("results".into(), serde_json::to_value(blocks)?);
+    map.insert("next_cursor".into(), serde_json::Value::Null);
+    map.insert("has_more".into(), serde_json::json!(false));
+    Ok(Json(serde_json::Value::Object(map)))
 }

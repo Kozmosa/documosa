@@ -94,7 +94,7 @@ pub async fn append_blocks(
     page_id: &str,
     blocks: Vec<BlockInput>,
     after: Option<&str>,
-) -> Result<PageSnapshot> {
+) -> Result<Vec<Block>> {
     if blocks.is_empty() {
         return Err(AppError::BadRequest("at least one block is required".into()));
     }
@@ -204,7 +204,7 @@ pub async fn append_blocks(
     .await?;
 
     tx.commit().await?;
-    super::page::snapshot(pool, page_id).await
+    Ok(inserted)
 }
 
 pub async fn update_block(
