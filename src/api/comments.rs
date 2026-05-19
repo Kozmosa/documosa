@@ -69,15 +69,16 @@ async fn list_comments(
 ) -> Result<impl IntoResponse> {
     let _block = db::get_block(&state.pool, &block_id).await?;
 
-    let comments = sqlx::query_as::<_, Comment>(
+    let mut comments = sqlx::query_as::<_, Comment>(
         "SELECT id, page_id, target_block_id, start_column, end_column, author_client_id, author_nickname, role_mode, body, resolved, created_at, updated_at FROM comments WHERE target_block_id = ? ORDER BY created_at",
     )
     .bind(&block_id)
     .fetch_all(&state.pool)
     .await?;
+    for comment in &mut comments { comment.object = "comment".into(); }
 
     let comment_ids: Vec<String> = comments.iter().map(|c| c.id.clone()).collect();
-    let replies = if comment_ids.is_empty() {
+    let mut replies = if comment_ids.is_empty() {
         vec![]
     } else {
         let mut qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
@@ -92,7 +93,7 @@ async fn list_comments(
             .fetch_all(&state.pool)
             .await?
     };
-
+    for reply in &mut replies { reply.object = "comment_reply".into(); }
     Ok(Json(BlockCommentsResponse {
         object: "list",
         comments,

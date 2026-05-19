@@ -37,7 +37,7 @@ pub async fn list_children(
 
     let take = page_size + 1; // fetch one extra to determine has_more
 
-    let blocks = if let Some(parent_id) = parent_block_id {
+    let mut blocks = if let Some(parent_id) = parent_block_id {
         if let Some(c) = cursor {
             sqlx::query_as::<_, Block>(
                 "SELECT id, page_id, parent_id, order_index, block_type, content_json, properties_json, revision, deleted, created_at, updated_at FROM blocks WHERE page_id = ? AND deleted = 0 AND parent_id = ? AND order_index > ? ORDER BY order_index LIMIT ?",
@@ -76,6 +76,10 @@ pub async fn list_children(
         .fetch_all(pool)
         .await?
     };
+
+    for block in &mut blocks {
+        block.object = "block".into();
+    }
 
     let has_more = blocks.len() > page_size as usize;
     let result_blocks = if has_more {
@@ -354,6 +358,7 @@ pub async fn insert_block_tx(
         deleted: false,
         created_at: timestamp.clone(),
         updated_at: timestamp.clone(),
+        object: "block".into(),
     };
     sqlx::query(
         "INSERT INTO blocks (id, page_id, parent_id, order_index, block_type, content_json, properties_json, revision, deleted, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)",

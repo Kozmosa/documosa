@@ -121,33 +121,37 @@ pub async fn snapshot(pool: &SqlitePool, page_id: &str) -> Result<PageSnapshot> 
     .fetch_one(pool)
     .await?;
 
-    let blocks = sqlx::query_as::<_, Block>(
+    let mut blocks = sqlx::query_as::<_, Block>(
         "SELECT id, page_id, parent_id, order_index, block_type, content_json, properties_json, revision, deleted, created_at, updated_at FROM blocks WHERE page_id = ? AND deleted = 0 ORDER BY order_index",
     )
     .bind(page_id)
     .fetch_all(pool)
     .await?;
+    for block in &mut blocks { block.object = "block".into(); }
 
-    let comments = sqlx::query_as::<_, Comment>(
+    let mut comments = sqlx::query_as::<_, Comment>(
         "SELECT id, page_id, target_block_id, start_column, end_column, author_client_id, author_nickname, role_mode, body, resolved, created_at, updated_at FROM comments WHERE page_id = ? ORDER BY created_at",
     )
     .bind(page_id)
     .fetch_all(pool)
     .await?;
+    for comment in &mut comments { comment.object = "comment".into(); }
 
-    let replies = sqlx::query_as::<_, CommentReply>(
+    let mut replies = sqlx::query_as::<_, CommentReply>(
         "SELECT r.id, r.comment_id, r.author_client_id, r.author_nickname, r.role_mode, r.body, r.created_at FROM comment_replies r JOIN comments c ON c.id = r.comment_id WHERE c.page_id = ? ORDER BY r.created_at",
     )
     .bind(page_id)
     .fetch_all(pool)
     .await?;
+    for reply in &mut replies { reply.object = "comment_reply".into(); }
 
-    let suggestions = sqlx::query_as::<_, Suggestion>(
+    let mut suggestions = sqlx::query_as::<_, Suggestion>(
         "SELECT id, page_id, kind, target_block_id, parent_id, content_json, base_revisions_json, state, author_client_id, author_nickname, role_mode, created_at, decided_by_client_id, decided_by_nickname, decided_at FROM suggestions WHERE page_id = ? ORDER BY created_at",
     )
     .bind(page_id)
     .fetch_all(pool)
     .await?;
+    for suggestion in &mut suggestions { suggestion.object = "suggestion".into(); }
 
     let locks = sqlx::query_as::<_, BlockLock>(
         "SELECT block_id, page_id, owner_client_id, owner_nickname, expires_at FROM block_locks WHERE page_id = ? AND expires_at > ? ORDER BY expires_at",

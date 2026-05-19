@@ -34,6 +34,9 @@ pub struct Block {
     pub deleted: bool,
     pub created_at: String,
     pub updated_at: String,
+    #[cfg_attr(feature = "sqlx", sqlx(default))]
+    #[serde(default = "default_block_object")]
+    pub object: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,6 +64,9 @@ pub struct Comment {
     pub resolved: bool,
     pub created_at: String,
     pub updated_at: String,
+    #[cfg_attr(feature = "sqlx", sqlx(default))]
+    #[serde(default = "default_comment_object")]
+    pub object: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,6 +79,9 @@ pub struct CommentReply {
     pub role_mode: String,
     pub body: String,
     pub created_at: String,
+    #[cfg_attr(feature = "sqlx", sqlx(default))]
+    #[serde(default = "default_comment_reply_object")]
+    pub object: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,6 +102,9 @@ pub struct Suggestion {
     pub decided_by_client_id: Option<String>,
     pub decided_by_nickname: Option<String>,
     pub decided_at: Option<String>,
+    #[cfg_attr(feature = "sqlx", sqlx(default))]
+    #[serde(default = "default_suggestion_object")]
+    pub object: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -171,3 +183,8 @@ pub struct BaseRevision {
     pub block_id: String,
     pub revision: i64,
 }
+
+fn default_block_object() -> String { "block".into() }
+fn default_comment_object() -> String { "comment".into() }
+fn default_comment_reply_object() -> String { "comment_reply".into() }
+fn default_suggestion_object() -> String { "suggestion".into() }
