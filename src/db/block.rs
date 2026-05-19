@@ -289,6 +289,22 @@ pub async fn delete_block(
         return Err(AppError::NotFound);
     }
 
+    // Cascade soft-delete all descendants
+    sqlx::query(
+        "WITH RECURSIVE descendants(id) AS ( \
+           SELECT id FROM blocks WHERE parent_id = ? AND deleted = 0 \
+           UNION ALL \
+           SELECT blocks.id FROM blocks JOIN descendants ON blocks.parent_id = descendants.id \
+           WHERE blocks.deleted = 0 \
+         ) \
+         UPDATE blocks SET deleted = 1, revision = revision + 1, updated_at = ? \
+         WHERE id IN (SELECT id FROM descendants)"
+    )
+    .bind(block_id)
+    .bind(&timestamp)
+    .execute(&mut *tx)
+    .await?;
+
     touch_page_tx(&mut tx, &page_id).await?;
     audit_tx(
         &mut tx,

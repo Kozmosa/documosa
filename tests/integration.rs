@@ -2180,6 +2180,80 @@ async fn lock_bypass_test() {
     ));
 }
 
+#[tokio::test]
+async fn cascade_delete_test() {
+    let pool = pool().await;
+    let writer = actor("writer", RoleMode::Writer);
+
+    let created = documosa::db::create_page(
+        &pool,
+        &writer,
+        "Cascade".to_string(),
+        make_blocks_json(&["parent"]),
+    )
+    .await
+    .unwrap();
+    let page_id = created.page.id;
+    let parent_id = created.blocks[0].id.clone();
+
+    // Append child block under parent (by updating parent_id via raw SQL)
+    let child_result = documosa::db::append_blocks(
+        &pool,
+        &writer,
+        &page_id,
+        vec![block_input("child")],
+        Some(&parent_id),
+    )
+    .await
+    .unwrap();
+    let child_id = child_result.blocks[1].id.clone();
+    sqlx::query("UPDATE blocks SET parent_id = ? WHERE id = ?")
+        .bind(&parent_id)
+        .bind(&child_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Append grandchild under child
+    let grandchild_result = documosa::db::append_blocks(
+        &pool,
+        &writer,
+        &page_id,
+        vec![block_input("grandchild")],
+        Some(&child_id),
+    )
+    .await
+    .unwrap();
+    let grandchild_id = grandchild_result.blocks.last().unwrap().id.clone();
+    sqlx::query("UPDATE blocks SET parent_id = ? WHERE id = ?")
+        .bind(&child_id)
+        .bind(&grandchild_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Delete parent - should cascade to children
+    documosa::db::delete_block(&pool, &writer, &parent_id)
+        .await
+        .unwrap();
+
+    // Verify all 3 blocks are soft-deleted in DB
+    let count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM blocks WHERE id IN (?, ?, ?) AND deleted = 0"
+    )
+    .bind(&parent_id)
+    .bind(&child_id)
+    .bind(&grandchild_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(count.0, 0, "all three blocks should be soft-deleted");
+
+    // Verify snapshot returns no blocks
+    let snapshot = documosa::db::snapshot(&pool, &page_id).await.unwrap();
+    assert_eq!(snapshot.blocks.len(), 0);
+}
+
 // ─── mmdash adapter integration tests ───────────────────────────────
 
 #[tokio::test]
