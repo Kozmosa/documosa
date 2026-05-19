@@ -214,7 +214,7 @@ pub async fn update_block(
     block_type: Option<&str>,
     content_json: Option<&str>,
     properties_json: Option<&str>,
-) -> Result<PageSnapshot> {
+) -> Result<Block> {
     let mut tx = begin_write_tx(pool).await?;
     let block = get_block_tx(&mut tx, block_id).await?;
     let page_id = block.page_id.clone();
@@ -267,14 +267,14 @@ pub async fn update_block(
     .await?;
 
     tx.commit().await?;
-    super::page::snapshot(pool, &page_id).await
+    get_block(pool, block_id).await
 }
 
 pub async fn delete_block(
     pool: &SqlitePool,
     actor: &Identity,
     block_id: &str,
-) -> Result<PageSnapshot> {
+) -> Result<Block> {
     let mut tx = begin_write_tx(pool).await?;
     let block = get_block_tx(&mut tx, block_id).await?;
     let page_id = block.page_id.clone();
@@ -329,7 +329,7 @@ pub async fn delete_block(
     .await?;
 
     tx.commit().await?;
-    super::page::snapshot(pool, &page_id).await
+    Ok(block)
 }
 
 pub async fn insert_block_tx(

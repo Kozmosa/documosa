@@ -299,7 +299,7 @@ async fn call_tool(state: &AppState, name: &str, args: Value) -> Result<Value> {
                 (None, _) => None,
             };
 
-            let snap = db::update_block(
+            let block = db::update_block(
                 &state.pool,
                 &actor,
                 &block_id,
@@ -308,14 +308,16 @@ async fn call_tool(state: &AppState, name: &str, args: Value) -> Result<Value> {
                 properties_json,
             )
             .await?;
-            state.hub.block_updated(&snap.page.id, &block_id);
+            state.hub.block_updated(&block.page_id, &block_id);
+            let snap = db::snapshot(&state.pool, &block.page_id).await?;
             (json!(snap), None)
         }
         "block_delete" => {
             let block_id = string_arg(&args, "block_id")?;
-            let snap =
+            let block =
                 db::delete_block(&state.pool, &actor, &block_id).await?;
-            state.hub.block_deleted(&snap.page.id, &[block_id]);
+            state.hub.block_deleted(&block.page_id, &[block_id]);
+            let snap = db::snapshot(&state.pool, &block.page_id).await?;
             (json!(snap), None)
         }
         "comment_create" => {

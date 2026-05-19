@@ -383,10 +383,7 @@ async fn page_blocks_locks_comments_suggestions_and_audit_work() {
     )
     .await
     .unwrap();
-    assert_eq!(
-        block_text(edited.blocks.iter().find(|b| b.id == first).unwrap()),
-        "ONE"
-    );
+    assert_eq!(block_text(&edited), "ONE");
 
     // Heartbeat locks on second block
     documosa::db::heartbeat_locks(&pool, &other, &page_id, vec![second.clone()])
@@ -494,7 +491,7 @@ async fn block_audit_details_store_summaries_counts_and_block_ids() {
     assert_eq!(created_details["title"], "Draft");
 
     // Append a block
-    let appended = documosa::db::append_blocks(
+    documosa::db::append_blocks(
         &pool,
         &writer,
         &page_id,
@@ -507,12 +504,13 @@ async fn block_audit_details_store_summaries_counts_and_block_ids() {
     )
     .await
     .unwrap();
-    let append_details = audit_details(&appended, "blocks.appended");
+    let snap = documosa::db::snapshot(&pool, &page_id).await.unwrap();
+    let append_details = audit_details(&snap, "blocks.appended");
     assert_eq!(append_details["count"], 1);
     let appended_id = append_details["block_ids"][0].as_str().unwrap().to_string();
 
     // Update first block
-    let updated = documosa::db::update_block(
+    documosa::db::update_block(
         &pool,
         &writer,
         &first_id,
@@ -522,15 +520,17 @@ async fn block_audit_details_store_summaries_counts_and_block_ids() {
     )
     .await
     .unwrap();
-    let update_details = audit_details(&updated, "block.updated");
+    let snap = documosa::db::snapshot(&pool, &page_id).await.unwrap();
+    let update_details = audit_details(&snap, "block.updated");
     assert_eq!(update_details["block_id"], first_id);
     assert_eq!(update_details["before_block_type"], "paragraph");
 
     // Delete the appended block
-    let deleted = documosa::db::delete_block(&pool, &writer, &appended_id)
+    documosa::db::delete_block(&pool, &writer, &appended_id)
         .await
         .unwrap();
-    let delete_details = audit_details(&deleted, "block.deleted");
+    let snap = documosa::db::snapshot(&pool, &page_id).await.unwrap();
+    let delete_details = audit_details(&snap, "block.deleted");
     assert_eq!(delete_details["block_id"], appended_id);
     assert_eq!(delete_details["block_type"], "paragraph");
 }
@@ -559,7 +559,10 @@ async fn inserting_blocks_without_anchor_places_blocks_at_end() {
     .await
     .unwrap();
 
-    assert_eq!(block_texts(&appended.blocks), vec!["one", "two", "zero-a", "zero-b"]);
+    assert_eq!(block_texts(&appended), vec!["zero-a", "zero-b"]);
+
+    let snap = documosa::db::snapshot(&pool, &created.page.id).await.unwrap();
+    assert_eq!(block_texts(&snap.blocks), vec!["one", "two", "zero-a", "zero-b"]);
 }
 
 #[tokio::test]
@@ -587,8 +590,11 @@ async fn inserting_blocks_after_anchor_keeps_stable_order() {
     .await
     .unwrap();
 
+    assert_eq!(block_texts(&appended), vec!["one-a", "one-b"]);
+
+    let snap = documosa::db::snapshot(&pool, &created.page.id).await.unwrap();
     assert_eq!(
-        block_texts(&appended.blocks),
+        block_texts(&snap.blocks),
         vec!["one", "one-a", "one-b", "two"]
     );
 }
@@ -841,7 +847,7 @@ async fn history_diff_uses_stored_page_versions_and_conflicts_when_missing() {
         .id
         .clone();
 
-    let appended = documosa::db::append_blocks(
+    documosa::db::append_blocks(
         &pool,
         &writer,
         &page_id,
@@ -850,7 +856,8 @@ async fn history_diff_uses_stored_page_versions_and_conflicts_when_missing() {
     )
     .await
     .unwrap();
-    let appended_event_id = appended
+    let snap = documosa::db::snapshot(&pool, &page_id).await.unwrap();
+    let appended_event_id = snap
         .audit_events
         .iter()
         .find(|event| event.event_type == "blocks.appended")
@@ -937,7 +944,7 @@ async fn history_diff_keeps_literal_diff_prefix_lines_agent_readable() {
         .id
         .clone();
 
-    let updated = documosa::db::update_block(
+    documosa::db::update_block(
         &pool,
         &writer,
         &first_block_id,
@@ -947,7 +954,8 @@ async fn history_diff_keeps_literal_diff_prefix_lines_agent_readable() {
     )
     .await
     .unwrap();
-    let updated_event_id = updated
+    let snap = documosa::db::snapshot(&pool, &page_id).await.unwrap();
+    let updated_event_id = snap
         .audit_events
         .iter()
         .find(|event| event.event_type == "block.updated")
@@ -1792,7 +1800,7 @@ async fn cli_commands_call_server_api() {
         .stdout
         .clone();
     let inserted: Value = serde_json::from_slice(&insert_output).unwrap();
-    let first_block_id = inserted["blocks"][0]["id"].as_str().unwrap().to_string();
+    let first_block_id = inserted["results"][0]["id"].as_str().unwrap().to_string();
 
     // Create suggestion
     Command::cargo_bin("documosa")
@@ -2210,7 +2218,7 @@ async fn cascade_delete_test() {
     )
     .await
     .unwrap();
-    let child_id = child_result.blocks[1].id.clone();
+    let child_id = child_result[0].id.clone();
     sqlx::query("UPDATE blocks SET parent_id = ? WHERE id = ?")
         .bind(&parent_id)
         .bind(&child_id)
@@ -2228,7 +2236,7 @@ async fn cascade_delete_test() {
     )
     .await
     .unwrap();
-    let grandchild_id = grandchild_result.blocks.last().unwrap().id.clone();
+    let grandchild_id = grandchild_result.last().unwrap().id.clone();
     sqlx::query("UPDATE blocks SET parent_id = ? WHERE id = ?")
         .bind(&child_id)
         .bind(&grandchild_id)
@@ -2293,7 +2301,7 @@ async fn float_renumber_test() {
     let blocks: Vec<BlockInput> = (1..=100)
         .map(|i| block_input(&format!("mid-{i}")))
         .collect();
-    let appended = documosa::db::append_blocks(
+    documosa::db::append_blocks(
         &pool,
         &writer,
         &page_id,
@@ -2303,11 +2311,13 @@ async fn float_renumber_test() {
     .await
     .unwrap();
 
-    assert_eq!(appended.blocks.len(), 102, "should have 102 total blocks");
+    let snap = documosa::db::snapshot(&pool, &page_id).await.unwrap();
+
+    assert_eq!(snap.blocks.len(), 102, "should have 102 total blocks");
 
     // Verify all blocks have strictly increasing order_index
     let mut prev_order = f64::NEG_INFINITY;
-    for block in &appended.blocks {
+    for block in &snap.blocks {
         assert!(
             block.order_index > prev_order,
             "block {} has order_index {} which is not > {}",
@@ -2317,7 +2327,7 @@ async fn float_renumber_test() {
     }
 
     // Verify content order
-    let texts = block_texts(&appended.blocks);
+    let texts = block_texts(&snap.blocks);
     assert_eq!(texts[0], "first");
     assert_eq!(texts[101], "last");
     assert_eq!(texts[50], "mid-50");

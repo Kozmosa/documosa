@@ -89,7 +89,7 @@ async fn update_block(
     Path(block_id): Path<String>,
     Json(body): Json<UpdateBlockRequest>,
 ) -> Result<impl IntoResponse> {
-    let snap = db::update_block(
+    let block = db::update_block(
         &state.pool,
         &actor,
         &block_id,
@@ -98,8 +98,8 @@ async fn update_block(
         body.properties_json.as_deref(),
     )
     .await?;
-    state.hub.block_updated(&snap.page.id, &block_id);
-    Ok(Json(wrap_object("page", snap)))
+    state.hub.block_updated(&block.page_id, &block.id);
+    Ok(Json(wrap_object("block", block)))
 }
 
 async fn delete_block(
@@ -107,9 +107,9 @@ async fn delete_block(
     MmdashIdentity(actor): MmdashIdentity,
     Path(block_id): Path<String>,
 ) -> Result<impl IntoResponse> {
-    let snap = db::delete_block(&state.pool, &actor, &block_id).await?;
-    state.hub.block_deleted(&snap.page.id, &[block_id]);
-    Ok(Json(wrap_object("page", snap)))
+    let block = db::delete_block(&state.pool, &actor, &block_id).await?;
+    state.hub.block_deleted(&block.page_id, std::slice::from_ref(&block.id));
+    Ok(Json(wrap_object("block", block)))
 }
 
 #[derive(Deserialize)]
