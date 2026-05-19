@@ -333,7 +333,9 @@ pub async fn delete_block(
     .await?;
 
     tx.commit().await?;
-    Ok(block)
+    // Return block with deleted flag set (re-read would fail due to deleted=0 filter)
+    let deleted_block = Block { deleted: true, updated_at: timestamp, ..block };
+    Ok(deleted_block)
 }
 
 pub async fn insert_block_tx(
