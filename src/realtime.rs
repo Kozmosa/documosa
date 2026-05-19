@@ -23,18 +23,21 @@ pub enum ServerEvent {
         document_id: String,
         users: Vec<Presence>,
     },
-    LinesInserted {
+    BlockInserted {
         document_id: String,
-        line_ids: Vec<String>,
-        after_line_id: Option<String>,
+        block_ids: Vec<String>,
+        after_block_id: Option<String>,
     },
-    LinesReplaced {
+    BlockUpdated {
         document_id: String,
-        line_ids: Vec<String>,
+        block_id: String,
     },
-    LinesDeleted {
+    BlockDeleted {
         document_id: String,
-        line_ids: Vec<String>,
+        block_ids: Vec<String>,
+    },
+    PageCreated {
+        document_id: String,
     },
     CommentCreated {
         document_id: String,
@@ -84,25 +87,31 @@ impl EventHub {
         self.tx.subscribe()
     }
 
-    pub fn lines_inserted(&self, document_id: &str, line_ids: &[String], after_line_id: Option<&str>) {
-        let _ = self.tx.send(ServerEvent::LinesInserted {
-            document_id: document_id.to_string(),
-            line_ids: line_ids.to_vec(),
-            after_line_id: after_line_id.map(str::to_string),
+    pub fn block_inserted(&self, page_id: &str, block_ids: &[String], after_block_id: Option<&str>) {
+        let _ = self.tx.send(ServerEvent::BlockInserted {
+            document_id: page_id.to_string(),
+            block_ids: block_ids.to_vec(),
+            after_block_id: after_block_id.map(str::to_string),
         });
     }
 
-    pub fn lines_replaced(&self, document_id: &str, line_ids: &[String]) {
-        let _ = self.tx.send(ServerEvent::LinesReplaced {
-            document_id: document_id.to_string(),
-            line_ids: line_ids.to_vec(),
+    pub fn block_updated(&self, page_id: &str, block_id: &str) {
+        let _ = self.tx.send(ServerEvent::BlockUpdated {
+            document_id: page_id.to_string(),
+            block_id: block_id.to_string(),
         });
     }
 
-    pub fn lines_deleted(&self, document_id: &str, line_ids: &[String]) {
-        let _ = self.tx.send(ServerEvent::LinesDeleted {
-            document_id: document_id.to_string(),
-            line_ids: line_ids.to_vec(),
+    pub fn block_deleted(&self, page_id: &str, block_ids: &[String]) {
+        let _ = self.tx.send(ServerEvent::BlockDeleted {
+            document_id: page_id.to_string(),
+            block_ids: block_ids.to_vec(),
+        });
+    }
+
+    pub fn page_created(&self, page_id: &str) {
+        let _ = self.tx.send(ServerEvent::PageCreated {
+            document_id: page_id.to_string(),
         });
     }
 
@@ -207,9 +216,10 @@ pub async fn websocket(socket: WebSocket, hub: EventHub, document_id: String, id
         while let Ok(event) = rx.recv().await {
             let event_doc = match &event {
                 ServerEvent::Presence { document_id, .. }
-                | ServerEvent::LinesInserted { document_id, .. }
-                | ServerEvent::LinesReplaced { document_id, .. }
-                | ServerEvent::LinesDeleted { document_id, .. }
+                | ServerEvent::BlockInserted { document_id, .. }
+                | ServerEvent::BlockUpdated { document_id, .. }
+                | ServerEvent::BlockDeleted { document_id, .. }
+                | ServerEvent::PageCreated { document_id }
                 | ServerEvent::CommentCreated { document_id, .. }
                 | ServerEvent::CommentResolved { document_id, .. }
                 | ServerEvent::SuggestionCreated { document_id, .. }
