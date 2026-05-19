@@ -1142,6 +1142,7 @@ async fn history_api_lists_and_filters_events() {
             Request::builder()
                 .method("GET")
                 .uri(format!("/pages/{page_id}/history?from=not-a-date"))
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1752,10 +1753,10 @@ async fn cli_commands_call_server_api() {
     let created: Value = serde_json::from_slice(&create_output).unwrap();
     let page_id = created["page"]["id"].as_str().unwrap().to_string();
 
-    // List documents (no JWT needed for GET /pages)
+    // List documents
     let list_output = Command::cargo_bin("documosa")
         .unwrap()
-        .args(["document", "list", "--server", &base])
+        .args(["document", "list", "--server", &base, "--jwt", &token])
         .assert()
         .success()
         .get_output()
@@ -1817,6 +1818,8 @@ async fn cli_commands_call_server_api() {
             "list",
             "--server",
             &base,
+            "--jwt",
+            &token,
             &page_id,
             "--category",
             "all",
@@ -1856,6 +1859,8 @@ async fn cli_commands_call_server_api() {
             "list",
             "--server",
             &base,
+            "--jwt",
+            &token,
             &page_id,
             "--category",
             "suggestion",
@@ -1879,6 +1884,8 @@ async fn cli_commands_call_server_api() {
             "diff",
             "--server",
             &base,
+            "--jwt",
+            &token,
             &page_id,
             "--from",
             &created_event_id,
@@ -1904,6 +1911,8 @@ async fn cli_commands_call_server_api() {
             "diff",
             "--server",
             &base,
+            "--jwt",
+            &token,
             &page_id,
             "--from",
             &created_event_id,
@@ -1929,6 +1938,8 @@ async fn cli_commands_call_server_api() {
             "diff",
             "--server",
             &base,
+            "--jwt",
+            &token,
             &page_id,
             "--from",
             &inserted_event_id,
@@ -2084,14 +2095,18 @@ async fn static_file_serve_rejects_path_traversal() {
 
 #[tokio::test]
 async fn export_page_returns_not_found_for_unknown_id() {
+    ensure_jwt_secret();
+
     let pool = pool().await;
     let app = documosa::build_app(pool, PathBuf::from("missing")).await;
+    let token = mmdash_token("test-user", None);
 
     let response = app
         .oneshot(
             Request::builder()
                 .method("GET")
                 .uri("/pages/not-a-real-id/export/md")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
                 .body(Body::empty())
                 .unwrap(),
         )

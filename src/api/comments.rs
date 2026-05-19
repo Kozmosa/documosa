@@ -62,6 +62,7 @@ struct BlockCommentsResponse {
 
 async fn list_comments(
     State(state): State<AppState>,
+    MmdashIdentity(_actor): MmdashIdentity,
     Path(block_id): Path<String>,
 ) -> Result<impl IntoResponse> {
     let _block = db::get_block(&state.pool, &block_id).await?;

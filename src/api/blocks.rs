@@ -19,6 +19,7 @@ pub fn router() -> Router<AppState> {
 
 async fn get_block(
     State(state): State<AppState>,
+    MmdashIdentity(_actor): MmdashIdentity,
     Path(block_id): Path<String>,
 ) -> Result<impl IntoResponse> {
     Ok(Json(db::get_block(&state.pool, &block_id).await?))
@@ -39,6 +40,7 @@ struct ListChildrenResponse {
 
 async fn list_children(
     State(state): State<AppState>,
+    MmdashIdentity(_actor): MmdashIdentity,
     Path(block_id): Path<String>,
     Query(query): Query<ListChildrenQuery>,
 ) -> Result<impl IntoResponse> {

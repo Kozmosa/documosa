@@ -28,6 +28,7 @@ struct HistoryQuery {
 
 async fn list_history(
     State(state): State<AppState>,
+    MmdashIdentity(_actor): MmdashIdentity,
     Path(page_id): Path<String>,
     Query(query): Query<HistoryQuery>,
 ) -> Result<impl IntoResponse> {
@@ -56,6 +57,7 @@ struct HistoryDiffQuery {
 
 async fn history_diff(
     State(state): State<AppState>,
+    MmdashIdentity(_actor): MmdashIdentity,
     Path(page_id): Path<String>,
     Query(query): Query<HistoryDiffQuery>,
 ) -> Result<impl IntoResponse> {

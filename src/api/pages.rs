@@ -41,12 +41,14 @@ async fn create_page(
 
 async fn list_pages(
     State(state): State<AppState>,
+    MmdashIdentity(_actor): MmdashIdentity,
 ) -> Result<impl IntoResponse> {
     Ok(Json(db::list_pages(&state.pool).await?))
 }
 
 async fn get_page(
     State(state): State<AppState>,
+    MmdashIdentity(_actor): MmdashIdentity,
     Path(page_id): Path<String>,
 ) -> Result<impl IntoResponse> {
     Ok(Json(db::get_page(&state.pool, &page_id).await?))
@@ -67,6 +69,7 @@ async fn update_page(
 
 async fn get_snapshot(
     State(state): State<AppState>,
+    MmdashIdentity(_actor): MmdashIdentity,
     Path(page_id): Path<String>,
 ) -> Result<impl IntoResponse> {
     Ok(Json(db::snapshot(&state.pool, &page_id).await?))
