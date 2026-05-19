@@ -40,61 +40,6 @@
   transition-delay: 0s, 0s, 0s, 0s, 220ms;
 }
 
-.cherry-shell {
-  height: calc(100vh - 112px);
-  min-height: 420px;
-  position: relative;
-  overflow: hidden;
-}
-
-.cherry-shell .cherry {
-  height: 100%;
-  border: 0;
-}
-
-.cherry-shell .cherry-toolbar {
-  border-bottom-color: hsl(var(--border));
-}
-
-.cherry-shell.read-only .cherry-toolbar {
-  opacity: 0.48;
-  pointer-events: none;
-}
-
-.comment-overlay {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.comment-underline {
-  position: absolute;
-  z-index: 2;
-  height: 6px;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  border-bottom: 2px solid hsl(var(--primary));
-  background: transparent;
-  pointer-events: auto;
-  cursor: pointer;
-}
-
-.flash-comment {
-  animation: comment-flash 900ms ease-out;
-}
-
-@keyframes comment-flash {
-  0%, 100% {
-    background: hsl(var(--card));
-  }
-
-  28%, 70% {
-    background: hsl(var(--secondary));
-  }
-}
-
 .history-diff-view {
   min-height: 0;
   position: relative;
@@ -138,11 +83,6 @@
 }
 
 @media (max-width: 760px) {
-  .cherry-shell {
-    height: 62vh;
-    min-height: 360px;
-  }
-
   .review-column {
     grid-template-columns: 1fr;
   }

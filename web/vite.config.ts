@@ -12,8 +12,6 @@ export default defineConfig({
     },
   },
   build: {
-    // Cherry Markdown ships the interactive editor as one monolithic ESM file.
-    // It is loaded only after a document opens, so the initial app chunk stays small.
-    chunkSizeWarningLimit: 6000,
+    chunkSizeWarningLimit: 1000,
   },
 })
