@@ -9,23 +9,23 @@ use super::audit::{audit_tx, begin_write_tx};
 pub async fn create_page(
     pool: &SqlitePool,
     actor: &Identity,
-    title: String,
+    title_json: String,
     blocks_json: String,
 ) -> Result<PageSnapshot> {
     let mut tx = begin_write_tx(pool).await?;
     let timestamp = now();
     let page = Page {
         id: new_id(),
-        title,
+        title_json,
         properties_json: "{}".to_string(),
         created_at: timestamp.clone(),
         updated_at: timestamp.clone(),
     };
     sqlx::query(
-        "INSERT INTO pages (id, title, properties_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO pages (id, title_json, properties_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
     )
     .bind(&page.id)
-    .bind(&page.title)
+    .bind(&page.title_json)
     .bind(&page.properties_json)
     .bind(&page.created_at)
     .bind(&page.updated_at)
@@ -60,7 +60,7 @@ pub async fn create_page(
         actor,
         "page.created",
         json!({
-            "title": page.title,
+            "title": Page::plain_title_from_json(&page.title_json),
         }),
     )
     .await?;
@@ -70,7 +70,7 @@ pub async fn create_page(
 
 pub async fn get_page(pool: &SqlitePool, page_id: &str) -> Result<Page> {
     sqlx::query_as::<_, Page>(
-        "SELECT id, title, properties_json, created_at, updated_at FROM pages WHERE id = ?",
+        "SELECT id, title_json, properties_json, created_at, updated_at FROM pages WHERE id = ?",
     )
     .bind(page_id)
     .fetch_optional(pool)
@@ -80,7 +80,7 @@ pub async fn get_page(pool: &SqlitePool, page_id: &str) -> Result<Page> {
 
 pub async fn list_pages(pool: &SqlitePool) -> Result<Vec<Page>> {
     Ok(sqlx::query_as::<_, Page>(
-        "SELECT id, title, properties_json, created_at, updated_at FROM pages ORDER BY updated_at DESC",
+        "SELECT id, title_json, properties_json, created_at, updated_at FROM pages ORDER BY updated_at DESC",
     )
     .fetch_all(pool)
     .await?)
@@ -90,12 +90,13 @@ pub async fn update_page_title(
     pool: &SqlitePool,
     actor: &Identity,
     page_id: &str,
-    title: &str,
+    title_json: &str,
 ) -> Result<()> {
     let mut tx = begin_write_tx(pool).await?;
     let timestamp = now();
-    sqlx::query("UPDATE pages SET title = ?, updated_at = ? WHERE id = ?")
-        .bind(title)
+    let plain_title = Page::plain_title_from_json(title_json);
+    sqlx::query("UPDATE pages SET title_json = ?, updated_at = ? WHERE id = ?")
+        .bind(title_json)
         .bind(&timestamp)
         .bind(page_id)
         .execute(&mut *tx)
@@ -105,7 +106,7 @@ pub async fn update_page_title(
         page_id,
         actor,
         "page.title_updated",
-        json!({ "title": title }),
+        json!({ "title": plain_title }),
     )
     .await?;
     tx.commit().await?;
@@ -115,7 +116,7 @@ pub async fn update_page_title(
 pub async fn snapshot(pool: &SqlitePool, page_id: &str) -> Result<PageSnapshot> {
     let timestamp = now();
     let page = sqlx::query_as::<_, Page>(
-        "SELECT id, title, properties_json, created_at, updated_at FROM pages WHERE id = ?",
+        "SELECT id, title_json, properties_json, created_at, updated_at FROM pages WHERE id = ?",
     )
     .bind(page_id)
     .fetch_one(pool)
@@ -181,7 +182,7 @@ pub async fn snapshot(pool: &SqlitePool, page_id: &str) -> Result<PageSnapshot> 
 
 pub async fn export_markdown(pool: &SqlitePool, page_id: &str) -> Result<String> {
     let page = sqlx::query_as::<_, Page>(
-        "SELECT id, title, properties_json, created_at, updated_at FROM pages WHERE id = ?",
+        "SELECT id, title_json, properties_json, created_at, updated_at FROM pages WHERE id = ?",
     )
     .bind(page_id)
     .fetch_one(pool)
@@ -194,7 +195,7 @@ pub async fn export_markdown(pool: &SqlitePool, page_id: &str) -> Result<String>
     .fetch_all(pool)
     .await?;
 
-    let mut markdown = format!("# {}\n\n", page.title);
+    let mut markdown = format!("# {}\n\n", page.plain_title());
 
     for block in &blocks {
         let tokens: Vec<serde_json::Value> =

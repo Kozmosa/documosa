@@ -14,10 +14,30 @@ pub fn new_id() -> String {
 #[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
 pub struct Page {
     pub id: String,
-    pub title: String,
+    pub title_json: String,
     pub properties_json: String,
     pub created_at: String,
     pub updated_at: String,
+}
+
+impl Page {
+    pub fn plain_title(&self) -> String {
+        let tokens: Vec<serde_json::Value> =
+            serde_json::from_str(&self.title_json).unwrap_or_default();
+        tokens
+            .iter()
+            .filter_map(|t| t.get("plain_text").and_then(|v| v.as_str()))
+            .collect()
+    }
+
+    pub fn plain_title_from_json(title_json: &str) -> String {
+        let tokens: Vec<serde_json::Value> =
+            serde_json::from_str(title_json).unwrap_or_default();
+        tokens
+            .iter()
+            .filter_map(|t| t.get("plain_text").and_then(|v| v.as_str()))
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

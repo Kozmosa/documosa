@@ -68,7 +68,7 @@ pub async fn connect_memory() -> anyhow::Result<SqlitePool> {
 
 pub async fn migrate(pool: &SqlitePool) -> Result<()> {
     let schema = [
-        "CREATE TABLE IF NOT EXISTS pages (id TEXT PRIMARY KEY, title TEXT NOT NULL, properties_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS pages (id TEXT PRIMARY KEY, title_json TEXT NOT NULL DEFAULT '[]', properties_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS blocks (id TEXT PRIMARY KEY, page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE, parent_id TEXT REFERENCES blocks(id) ON DELETE CASCADE, order_index REAL NOT NULL, block_type TEXT NOT NULL, content_json TEXT NOT NULL DEFAULT '[]', properties_json TEXT NOT NULL DEFAULT '{}', revision INTEGER NOT NULL DEFAULT 1, deleted INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
         "CREATE INDEX IF NOT EXISTS idx_blocks_page_order ON blocks(page_id, parent_id, deleted, order_index)",
         "CREATE INDEX IF NOT EXISTS idx_blocks_parent ON blocks(parent_id, deleted, order_index)",
@@ -84,5 +84,41 @@ pub async fn migrate(pool: &SqlitePool) -> Result<()> {
     for statement in schema {
         pool.execute(statement).await?;
     }
+
+    // Migration: add title_json column for databases with old 'title' column
+    let has_title: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM pragma_table_info('pages') WHERE name = 'title'")
+            .fetch_one(pool)
+            .await?;
+    if has_title.0 > 0 {
+        let has_title_json: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM pragma_table_info('pages') WHERE name = 'title_json'",
+        )
+        .fetch_one(pool)
+        .await?;
+        if has_title_json.0 == 0 {
+            pool.execute(
+                "ALTER TABLE pages ADD COLUMN title_json TEXT NOT NULL DEFAULT '[]'",
+            )
+            .await?;
+            let rows: Vec<(String, String)> =
+                sqlx::query_as("SELECT id, title FROM pages WHERE title != ''")
+                    .fetch_all(pool)
+                    .await?;
+            for (id, title) in rows {
+                let rt = serde_json::json!([{
+                    "type": "text",
+                    "text": { "content": title },
+                    "plain_text": title
+                }]);
+                sqlx::query("UPDATE pages SET title_json = ? WHERE id = ?")
+                    .bind(serde_json::to_string(&rt).unwrap())
+                    .bind(&id)
+                    .execute(pool)
+                    .await?;
+            }
+        }
+    }
+
     Ok(())
 }
