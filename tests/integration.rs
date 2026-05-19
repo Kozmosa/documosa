@@ -2254,6 +2254,71 @@ async fn cascade_delete_test() {
     assert_eq!(snapshot.blocks.len(), 0);
 }
 
+#[tokio::test]
+async fn float_renumber_test() {
+    let pool = pool().await;
+    let writer = actor("writer", RoleMode::Writer);
+
+    let created = documosa::db::create_page(
+        &pool,
+        &writer,
+        "Float Renumber".to_string(),
+        make_blocks_json(&["first", "last"]),
+    )
+    .await
+    .unwrap();
+    let page_id = created.page.id;
+    let first_id = created.blocks[0].id.clone();
+    let _last_id = created.blocks[1].id.clone();
+
+    // Set tight order_index values (no room between them)
+    sqlx::query("UPDATE blocks SET order_index = ? WHERE id = ?")
+        .bind(1.0)
+        .bind(&first_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE blocks SET order_index = ? WHERE id = ?")
+        .bind(2.0)
+        .bind(&_last_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Append 100 blocks between first and last
+    let blocks: Vec<BlockInput> = (1..=100)
+        .map(|i| block_input(&format!("mid-{i}")))
+        .collect();
+    let appended = documosa::db::append_blocks(
+        &pool,
+        &writer,
+        &page_id,
+        blocks,
+        Some(&first_id),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(appended.blocks.len(), 102, "should have 102 total blocks");
+
+    // Verify all blocks have strictly increasing order_index
+    let mut prev_order = f64::NEG_INFINITY;
+    for block in &appended.blocks {
+        assert!(
+            block.order_index > prev_order,
+            "block {} has order_index {} which is not > {}",
+            block.id, block.order_index, prev_order
+        );
+        prev_order = block.order_index;
+    }
+
+    // Verify content order
+    let texts = block_texts(&appended.blocks);
+    assert_eq!(texts[0], "first");
+    assert_eq!(texts[101], "last");
+    assert_eq!(texts[50], "mid-50");
+}
+
 // ─── mmdash adapter integration tests ───────────────────────────────
 
 #[tokio::test]

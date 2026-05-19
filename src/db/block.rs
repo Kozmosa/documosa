@@ -116,16 +116,40 @@ pub async fn append_blocks(
         None
     };
 
+    // Check if renumbering needed (gap too small for insertion)
+    let needs_renumber = match next_order {
+        Some(next) => (next - base_order) <= blocks.len() as f64,
+        None => false,
+    };
+    if needs_renumber {
+        renumber_page_blocks_tx(&mut tx, page_id).await?;
+    }
+
+    // Recompute positions if renumbered
+    let (final_base, final_next) = if needs_renumber {
+        let bo = if let Some(after_id) = after {
+            get_order_tx(&mut tx, after_id).await?
+        } else { 0.0 };
+        let no = if let Some(after_id) = after {
+            let after_order = get_order_tx(&mut tx, after_id).await?;
+            next_order_tx(&mut tx, page_id, after_order).await?
+        } else { None };
+        (bo, no)
+    } else {
+        (base_order, next_order)
+    };
+
+    // Single insertion loop
     let mut inserted = Vec::new();
-    if let Some(next) = next_order {
-        let gap = next - base_order;
+    if let Some(next) = final_next {
+        let gap = next - final_base;
         let step = gap / (blocks.len() as f64 + 1.0);
         for (i, input) in blocks.iter().enumerate() {
             let block = insert_block_tx(
                 &mut tx,
                 page_id,
                 None,
-                base_order + (i as f64 + 1.0) * step,
+                final_base + (i as f64 + 1.0) * step,
                 &input.block_type,
                 &input.content_json,
                 input.properties_json.as_deref().unwrap_or("{}"),
@@ -139,7 +163,7 @@ pub async fn append_blocks(
                 &mut tx,
                 page_id,
                 None,
-                base_order + (i as f64 + 1.0) * 1000.0,
+                final_base + (i as f64 + 1.0) * 1000.0,
                 &input.block_type,
                 &input.content_json,
                 input.properties_json.as_deref().unwrap_or("{}"),
@@ -439,4 +463,24 @@ async fn max_order_tx(
 
 fn text_summary(value: &str) -> String {
     value.chars().take(120).collect()
+}
+
+async fn renumber_page_blocks_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    page_id: &str,
+) -> Result<()> {
+    let ids: Vec<(String,)> = sqlx::query_as(
+        "SELECT id FROM blocks WHERE page_id = ? AND deleted = 0 AND parent_id IS NULL ORDER BY order_index"
+    )
+    .bind(page_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    for (i, (id,)) in ids.into_iter().enumerate() {
+        sqlx::query("UPDATE blocks SET order_index = ? WHERE id = ?")
+            .bind((i as f64 + 1.0) * 1000.0)
+            .bind(id)
+            .execute(&mut **tx)
+            .await?;
+    }
+    Ok(())
 }
