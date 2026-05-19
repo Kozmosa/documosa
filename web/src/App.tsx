@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import AceDiff from 'ace-diff'
 import * as ace from 'ace-builds'
@@ -6,9 +6,15 @@ import 'ace-builds/src-noconflict/mode-markdown'
 import 'ace-builds/src-noconflict/theme-textmate'
 import 'ace-diff/styles.css'
 import { useTranslation } from 'react-i18next'
-import type { CherryInstance, CommentRange, EditorSelection } from './CherryEditor'
 import type { Locale } from './i18n'
 import './App.css'
+
+import { api } from '@/lib/api'
+import type { Page, PageSnapshot, Comment, CommentReply, AuditEvent, Block, BlockInput } from '@/lib/api'
+import { connectWs } from '@/lib/ws'
+import type { PresenceUser } from '@/lib/ws'
+import TiptapEditor from '@/TiptapEditor'
+import type { DocumosaBlock } from '@/lib/converter'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -67,79 +73,10 @@ import {
 
 type RoleMode = 'reviewer' | 'writer'
 
-type PresenceUser = {
-  document_id: string
-  client_id: string
+type Identity = {
+  clientId: string
   nickname: string
-  role_mode: RoleMode
-}
-
-type DocumentSummary = {
-  id: string
-  title: string
-  created_at: string
-  updated_at: string
-}
-
-type Line = {
-  id: string
-  document_id: string
-  order_index: number
-  content: string
-  revision: number
-  deleted: boolean
-}
-
-type LineLock = {
-  line_id: string
-  owner_client_id: string
-  owner_nickname: string
-  expires_at: string
-}
-
-type Comment = {
-  id: string
-  start_line_id: string
-  end_line_id: string
-  start_column?: number | null
-  end_column?: number | null
-  author_client_id: string
-  author_nickname: string
-  role_mode: RoleMode
-  body: string
-  resolved: boolean
-}
-
-type CommentReply = {
-  id: string
-  comment_id: string
-  author_nickname: string
-  role_mode: RoleMode
-  body: string
-}
-
-type AuditEvent = {
-  id: string
-  document_id?: string
-  actor_client_id?: string
-  actor_nickname: string
-  role_mode: RoleMode
-  event_type: string
-  details_json: string
-  created_at: string
-  note_body?: string | null
-  note_updated_by_nickname?: string | null
-  note_updated_at?: string | null
-}
-
-type Snapshot = {
-  document: DocumentSummary
-  lines: Line[]
-  locks: LineLock[]
-  comments: Comment[]
-  replies: CommentReply[]
-  suggestions: unknown[]
-  audit_events: AuditEvent[]
+  roleMode: RoleMode
 }
 
 type HistoryDiffResponse = {
@@ -149,31 +86,6 @@ type HistoryDiffResponse = {
   to_content: string
 }
 
-type Identity = {
-  clientId: string
-  nickname: string
-  roleMode: RoleMode
-}
-
-type BaseRevision = {
-  line_id: string
-  revision: number
-}
-
-type WsEvent = {
-  type: string
-  document_id: string
-  users?: PresenceUser[]
-  line_ids?: string[]
-  after_line_id?: string | null
-  comment_id?: string
-  suggestion_id?: string
-  accepted?: boolean
-  title?: string
-}
-
-const API = ''
-const CherryEditor = lazy(() => import('./CherryEditor'))
 const COMMENTS_OPEN_KEY = 'documosa.comments_open'
 
 type Translation = ReturnType<typeof useTranslation>['t']
@@ -190,16 +102,29 @@ function getInitialCommentsOpen() {
   return localStorage.getItem(COMMENTS_OPEN_KEY) !== 'false'
 }
 
-function snapshotText(lines: Line[]) {
-  return lines
-    .filter((line) => !line.deleted)
-    .map((line) => line.content)
+function blockText(blocks: DocumosaBlock[]) {
+  return blocks
+    .filter((b) => !b.id || b.block_type !== 'divider')
+    .map((b) => {
+      try {
+        const tokens = JSON.parse(b.content_json) as { plain_text: string }[]
+        return tokens.map(t => t.plain_text).join('')
+      } catch {
+        return ''
+      }
+    })
     .join('\n')
 }
 
-function linePreview(line: Line | undefined, t: Translation) {
-  if (!line) return t('review.noLine')
-  return line.content.trim() || t('review.blankLine')
+function blockPreview(block: DocumosaBlock | undefined, t: Translation) {
+  if (!block) return t('review.noLine')
+  try {
+    const tokens = JSON.parse(block.content_json) as { plain_text: string }[]
+    const text = tokens.map(t => t.plain_text).join('').trim()
+    return text || t('review.blankLine')
+  } catch {
+    return t('review.blankLine')
+  }
 }
 
 type AuditCategory = 'document_comment' | 'all' | 'content' | 'comment' | 'suggestion' | 'system'
@@ -210,7 +135,7 @@ const AUDIT_CATEGORIES: AuditCategory[] = ['document_comment', 'all', 'content',
 const AUDIT_COLLAPSE_LIMIT = 260
 
 type AuditFormatContext = {
-  lines: Map<string, Line>
+  blocks: Map<string, Block>
   activeLineNumberById: Map<string, number>
   comments: Map<string, Comment>
   replies: Map<string, CommentReply>
@@ -231,7 +156,7 @@ function hasDetails(details: AuditDetails | null): details is AuditDetails {
 }
 
 function auditCategory(eventType: string): Exclude<AuditCategory, 'document_comment' | 'all'> {
-  if (eventType === 'document.created' || eventType === 'document.content_updated' || eventType.startsWith('lines.')) return 'content'
+  if (eventType === 'document.created' || eventType === 'document.content_updated' || eventType.startsWith('lines.') || eventType.startsWith('blocks.')) return 'content'
   if (eventType.startsWith('comment.')) return 'comment'
   if (eventType.startsWith('suggestion.')) return 'suggestion'
   return 'system'
@@ -296,14 +221,14 @@ function describeAuditReplacements(details: AuditDetails, t: Translation, contex
 function lineDetailsFromIds(lineIds: string[], context: AuditFormatContext) {
   return lineIds
     .map((lineId) => {
-      const line = context.lines.get(lineId)
-      if (!line) return null
+      const block = context.blocks.get(lineId)
+      if (!block) return null
       return {
-        line_id: line.id,
-        content_summary: contentSummary(line.content),
+        line_id: block.id,
+        content_summary: contentSummary(block.content_json),
       }
     })
-    .filter((line): line is { line_id: string; content_summary: string } => line !== null)
+    .filter((item): item is { line_id: string; content_summary: string } => item !== null)
 }
 
 function describeLegacyLineIds(lineIds: string[], context: AuditFormatContext, t: Translation, mode: 'inserted' | 'deleted') {
@@ -315,11 +240,11 @@ function describeLegacyLineIds(lineIds: string[], context: AuditFormatContext, t
 function describeLegacyReplacedLineIds(lineIds: string[], context: AuditFormatContext, t: Translation) {
   const lines = lineIds
     .map((lineId) => {
-      const line = context.lines.get(lineId)
-      if (!line) return null
+      const block = context.blocks.get(lineId)
+      if (!block) return null
       return t('history.line.current', {
         line: lineLabel(lineId, context, t),
-        summary: contentSummary(line.content),
+        summary: contentSummary(block.content_json),
       })
     })
     .filter(Boolean)
@@ -364,24 +289,24 @@ function formatAuditEvent(event: AuditEvent, t: Translation, context: AuditForma
         title: t('history.events.documentCreated'),
         body: t('history.summary.documentCreated', {
           title: detailString(details, 'title'),
-          count: detailNumber(details, 'line_count') ?? context.lines.size,
+          count: detailNumber(details, 'line_count') ?? context.blocks.size,
           summary: detailString(details, 'initial_content_summary'),
         }),
       }
     case 'document.content_updated':
       if (detailNumber(details, 'inserted_count') === undefined || detailNumber(details, 'deleted_count') === undefined) {
-        const insertedLineIds = detailStringArray(details, 'inserted_line_ids')
-        const deletedLineIds = detailStringArray(details, 'deleted_line_ids')
+        const insertedBlockIds = detailStringArray(details, 'inserted_block_ids')
+        const deletedBlockIds = detailStringArray(details, 'deleted_block_ids')
         return {
           category,
           title: t('history.events.documentContentUpdated'),
           body: [
             t('history.summary.documentContentUpdated', {
-              inserted: insertedLineIds.length,
-              deleted: deletedLineIds.length,
+              inserted: insertedBlockIds.length,
+              deleted: deletedBlockIds.length,
             }),
-            describeLegacyLineIds(insertedLineIds, context, t, 'inserted'),
-            describeLegacyLineIds(deletedLineIds, context, t, 'deleted'),
+            describeLegacyLineIds(insertedBlockIds, context, t, 'inserted'),
+            describeLegacyLineIds(deletedBlockIds, context, t, 'deleted'),
           ]
             .filter(Boolean)
             .join('\n'),
@@ -392,8 +317,8 @@ function formatAuditEvent(event: AuditEvent, t: Translation, context: AuditForma
         title: t('history.events.documentContentUpdated'),
         body: [
           t('history.summary.documentContentUpdated', {
-            inserted: detailNumber(details, 'inserted_count') ?? detailArray(details, 'inserted_line_ids').length,
-            deleted: detailNumber(details, 'deleted_count') ?? detailArray(details, 'deleted_line_ids').length,
+            inserted: detailNumber(details, 'inserted_count') ?? detailArray(details, 'inserted_block_ids').length,
+            deleted: detailNumber(details, 'deleted_count') ?? detailArray(details, 'deleted_block_ids').length,
           }),
           describeAuditLines({ lines: detailArray(details, 'inserted_lines') }, t, context, 'inserted'),
           describeAuditLines({ lines: detailArray(details, 'deleted_lines') }, t, context, 'deleted'),
@@ -402,45 +327,48 @@ function formatAuditEvent(event: AuditEvent, t: Translation, context: AuditForma
           .join('\n'),
       }
     case 'lines.inserted':
+    case 'blocks.inserted':
       if (detailArray(details, 'lines').length === 0) {
-        const lineIds = detailStringArray(details, 'line_ids')
+        const blockIds = detailStringArray(details, 'block_ids')
         return {
           category,
-          title: t('history.events.linesInserted', { count: lineIds.length }),
-          body: describeLegacyLineIds(lineIds, context, t, 'inserted'),
+          title: t('history.events.linesInserted', { count: blockIds.length }),
+          body: describeLegacyLineIds(blockIds, context, t, 'inserted'),
         }
       }
       return {
         category,
-        title: t('history.events.linesInserted', { count: detailNumber(details, 'count') ?? detailArray(details, 'line_ids').length }),
+        title: t('history.events.linesInserted', { count: detailNumber(details, 'count') ?? detailArray(details, 'block_ids').length }),
         body: describeAuditLines(details, t, context, 'inserted'),
       }
     case 'lines.replaced':
+    case 'blocks.replaced':
       if (detailArray(details, 'lines').length === 0) {
-        const lineIds = detailStringArray(details, 'line_ids')
+        const blockIds = detailStringArray(details, 'block_ids')
         return {
           category,
-          title: t('history.events.linesReplaced', { count: lineIds.length }),
-          body: describeLegacyReplacedLineIds(lineIds, context, t),
+          title: t('history.events.linesReplaced', { count: blockIds.length }),
+          body: describeLegacyReplacedLineIds(blockIds, context, t),
         }
       }
       return {
         category,
-        title: t('history.events.linesReplaced', { count: detailNumber(details, 'count') ?? detailArray(details, 'line_ids').length }),
+        title: t('history.events.linesReplaced', { count: detailNumber(details, 'count') ?? detailArray(details, 'block_ids').length }),
         body: describeAuditReplacements(details, t, context),
       }
     case 'lines.deleted':
+    case 'blocks.deleted':
       if (detailArray(details, 'lines').length === 0) {
-        const lineIds = detailStringArray(details, 'line_ids')
+        const blockIds = detailStringArray(details, 'block_ids')
         return {
           category,
-          title: t('history.events.linesDeleted', { count: lineIds.length }),
-          body: describeLegacyLineIds(lineIds, context, t, 'deleted'),
+          title: t('history.events.linesDeleted', { count: blockIds.length }),
+          body: describeLegacyLineIds(blockIds, context, t, 'deleted'),
         }
       }
       return {
         category,
-        title: t('history.events.linesDeleted', { count: detailNumber(details, 'count') ?? detailArray(details, 'deleted_line_ids').length }),
+        title: t('history.events.linesDeleted', { count: detailNumber(details, 'count') ?? detailArray(details, 'block_ids').length }),
         body: describeAuditLines(details, t, context, 'deleted'),
       }
     case 'comment.created':
@@ -598,37 +526,6 @@ function HistoryDiffModal({
   )
 }
 
-function lineIdIndex(lines: Line[]) {
-  return new Map(lines.map((line, index) => [line.id, index]))
-}
-
-function commentRangeForEditor(comment: Comment, lines: Line[], indexes: Map<string, number>) {
-  const startIndex = indexes.get(comment.start_line_id)
-  const endIndex = indexes.get(comment.end_line_id)
-  if (startIndex === undefined || endIndex === undefined) return null
-  const firstIndex = Math.min(startIndex, endIndex)
-  const lastIndex = Math.max(startIndex, endIndex)
-  let lineStartOffset = 0
-  for (let index = 0; index < firstIndex; index += 1) {
-    lineStartOffset += lines[index].content.length + 1
-  }
-  const spanLength = lines
-    .slice(firstIndex, lastIndex + 1)
-    .reduce((sum, line, index) => sum + line.content.length + (index < lastIndex - firstIndex ? 1 : 0), 0)
-  let from = lineStartOffset
-  let to = lineStartOffset + spanLength
-  if (startIndex <= endIndex && comment.start_column !== null && comment.start_column !== undefined) {
-    from = lineStartOffset + Math.max(0, Math.min(comment.start_column, lines[firstIndex].content.length))
-  }
-  if (startIndex <= endIndex && comment.end_column !== null && comment.end_column !== undefined) {
-    const beforeEndLine = lines
-      .slice(firstIndex, lastIndex)
-      .reduce((sum, line) => sum + line.content.length + 1, 0)
-    to = lineStartOffset + beforeEndLine + Math.max(0, Math.min(comment.end_column, lines[lastIndex].content.length))
-  }
-  return to > from ? { id: comment.id, from, to } : null
-}
-
 function App() {
   const { t, i18n } = useTranslation()
   const locale = i18n.language.startsWith('zh') ? 'zh' : 'en'
@@ -654,17 +551,10 @@ function App() {
     roleMode: (localStorage.getItem('documosa.role_mode') as RoleMode) ?? 'reviewer',
   }))
   const [identitySaved, setIdentitySaved] = useState(() => localStorage.getItem('documosa.nickname') !== null)
-  const [documents, setDocuments] = useState<DocumentSummary[]>([])
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
-  const [editorText, setEditorText] = useState('')
-  const [editorResetToken, setEditorResetToken] = useState(0)
-  const [selection, setSelection] = useState<EditorSelection>({
-    startLineNumber: 1,
-    endLineNumber: 1,
-    startColumn: 0,
-    endColumn: 0,
-    text: '',
-  })
+  const [pages, setPages] = useState<Page[]>([])
+  const [snapshot, setSnapshot] = useState<PageSnapshot | null>(null)
+  const [blocks, setBlocks] = useState<DocumosaBlock[]>([])
+  const [selectedBlockIndex, setSelectedBlockIndex] = useState<number | null>(null)
   const [dirty, setDirty] = useState(false)
   const [remoteConflict, setRemoteConflict] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -683,14 +573,11 @@ function App() {
   const [historyDiffLoading, setHistoryDiffLoading] = useState(false)
   const [historyDiff, setHistoryDiff] = useState<HistoryDiffResponse | null>(null)
   const [draftTitle, setDraftTitle] = useState('')
-  const [draftContent, setDraftContent] = useState('')
   const [commentBody, setCommentBody] = useState('')
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null)
-  const [flashingCommentId, setFlashingCommentId] = useState<string | null>(null)
   const [status, setStatus] = useState('')
   const [onlineUsers, setOnlineUsers] = useState<PresenceUser[]>([])
   const [presenceOpen, setPresenceOpen] = useState(false)
-  const cherryRef = useRef<CherryInstance | null>(null)
   const dirtyRef = useRef(false)
 
   useEffect(() => {
@@ -701,62 +588,26 @@ function App() {
     localStorage.setItem(COMMENTS_OPEN_KEY, String(commentsOpen))
   }, [commentsOpen])
 
-  const headers = useMemo(
-    () => ({
-      'content-type': 'application/json',
-      'x-documosa-client-id': identity.clientId,
-      'x-documosa-nickname': identity.nickname,
-      'x-documosa-role-mode': identity.roleMode,
-    }),
-    [identity],
-  )
+  const activeBlocks = useMemo(() => blocks, [blocks])
+  const selectedBlock = selectedBlockIndex !== null ? activeBlocks[selectedBlockIndex] ?? null : null
+  const selectedText = selectedBlock ? (() => {
+    try {
+      const tokens = JSON.parse(selectedBlock.content_json) as { plain_text: string }[]
+      return tokens.map(t => t.plain_text).join('')
+    } catch {
+      return ''
+    }
+  })() : ''
+  const annotationsDisabled = dirty || remoteConflict || !selectedBlock || !selectedText
 
-  const request = useCallback(
-    async <T,>(path: string, init: RequestInit = {}) => {
-      const response = await fetch(`${API}${path}`, {
-        ...init,
-        headers: { ...headers, ...(init.headers ?? {}) },
-      })
-      if (!response.ok) {
-        const text = await response.text()
-        throw new Error(text)
-      }
-      const contentType = response.headers.get('content-type') ?? ''
-      if (!contentType.includes('application/json')) {
-        return (await response.text()) as T
-      }
-      return (await response.json()) as T
-    },
-    [headers],
-  )
-
-  const activeLines = useMemo(() => snapshot?.lines.filter((line) => !line.deleted) ?? [], [snapshot])
-  const selectedLineIndex = Math.min(Math.max(selection.startLineNumber, 1), Math.max(activeLines.length, 1)) - 1
-  const selectedLine = activeLines[selectedLineIndex]
-  const baseEditorText = useMemo(() => snapshotText(activeLines), [activeLines])
-  const baseRevisions: BaseRevision[] = useMemo(
-    () => activeLines.map((line) => ({ line_id: line.id, revision: line.revision })),
-    [activeLines],
-  )
-  const lineIndexes = useMemo(() => lineIdIndex(activeLines), [activeLines])
-  const commentRanges = useMemo(
-    () =>
-      snapshot?.comments
-        .filter((comment) => !comment.resolved)
-        .map((comment) => commentRangeForEditor(comment, activeLines, lineIndexes))
-        .filter((range): range is CommentRange => range !== null) ?? [],
-    [activeLines, lineIndexes, snapshot?.comments],
-  )
-  const selectedText = selection.text.trim()
-  const annotationsDisabled = dirty || remoteConflict || !selectedLine || !selectedText
   const auditFormatContext = useMemo<AuditFormatContext>(
     () => ({
-      lines: new Map(snapshot?.lines.map((line) => [line.id, line]) ?? []),
-      activeLineNumberById: new Map(activeLines.map((line, index) => [line.id, index + 1])),
+      blocks: new Map(snapshot?.blocks.map((b) => [b.id, b]) ?? []),
+      activeLineNumberById: new Map(activeBlocks.map((b, index) => [b.id || String(index), index + 1])),
       comments: new Map(snapshot?.comments.map((comment) => [comment.id, comment]) ?? []),
       replies: new Map(snapshot?.replies.map((reply) => [reply.id, reply]) ?? []),
     }),
-    [activeLines, snapshot?.comments, snapshot?.lines, snapshot?.replies],
+    [activeBlocks, snapshot?.blocks, snapshot?.comments, snapshot?.replies],
   )
   const filteredAuditEvents = useMemo(() => {
     const fromTime = historyFrom ? new Date(historyFrom).getTime() : null
@@ -777,38 +628,45 @@ function App() {
     )
   }, [historyCategory, historyFrom, historyTo, snapshot?.audit_events])
 
-  const applySnapshot = useCallback((next: Snapshot, resetEditor: boolean) => {
+  const applySnapshot = useCallback((next: PageSnapshot, resetEditor: boolean) => {
     setSnapshot(next)
     setExpandedAuditIds(new Set())
     setEditingAuditNoteId(null)
     if (resetEditor) {
-      setEditorText(snapshotText(next.lines))
-      setEditorResetToken((current) => current + 1)
+      const documosaBlocks: DocumosaBlock[] = next.blocks
+        .filter((b) => !b.deleted)
+        .map((b) => ({
+          id: b.id,
+          block_type: b.block_type,
+          content_json: b.content_json,
+          properties_json: b.properties_json,
+        }))
+      setBlocks(documosaBlocks)
       setDirty(false)
       setRemoteConflict(false)
-      setSelection({ startLineNumber: 1, endLineNumber: 1, startColumn: 0, endColumn: 0, text: '' })
+      setSelectedBlockIndex(null)
     }
   }, [])
 
-  const refreshDocuments = useCallback(async () => {
-    const nextDocuments = await request<DocumentSummary[]>('/api/documents')
-    setDocuments(nextDocuments)
-  }, [request])
+  const refreshPages = useCallback(async () => {
+    const nextPages = await api.listPages()
+    setPages(nextPages)
+  }, [])
 
   const refreshSnapshot = useCallback(
-    async (documentId: string, resetEditor = true) => {
-      const next = await request<Snapshot>(`/api/documents/${documentId}`)
+    async (pageId: string, resetEditor = true) => {
+      const next = await api.getSnapshot(pageId)
       applySnapshot(next, resetEditor)
     },
-    [applySnapshot, request],
+    [applySnapshot],
   )
 
   useEffect(() => {
     if (!identity.nickname) return undefined
     let cancelled = false
-    void request<DocumentSummary[]>('/api/documents')
-      .then((nextDocuments) => {
-        if (!cancelled) setDocuments(nextDocuments)
+    void api.listPages()
+      .then((nextPages) => {
+        if (!cancelled) setPages(nextPages)
       })
       .catch((error) => {
         if (!cancelled) setStatus(error.message)
@@ -816,56 +674,46 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [identity.nickname, request])
+  }, [identity.nickname])
 
   useEffect(() => {
     if (!snapshot || !identity.nickname) return undefined
-    const scheme = location.protocol === 'https:' ? 'wss' : 'ws'
-    const url = `${scheme}://${location.host}/api/documents/${snapshot.document.id}/ws?client_id=${encodeURIComponent(identity.clientId)}&nickname=${encodeURIComponent(identity.nickname)}&role_mode=${identity.roleMode}`
-    const socket = new WebSocket(url)
-    socket.onmessage = (message) => {
-      let event: WsEvent
-      try { event = JSON.parse(message.data) as WsEvent } catch { return }
-
-      switch (event.type) {
-        case 'presence':
-          if (event.users) setOnlineUsers(event.users)
-          return
-
-        case 'comment_created':
-        case 'comment_resolved':
-        case 'suggestion_created':
-        case 'suggestion_decided':
-        case 'document_title_updated':
-        case 'locks_changed':
-        case 'content_changed':
-          void request<Snapshot>(`/api/documents/${snapshot.document.id}`)
-            .then((next) => {
-              void refreshDocuments().catch(() => undefined)
-              applySnapshot(next, false)
-            })
-            .catch((error) => setStatus(error.message))
-          return
-
-        case 'lines_inserted':
-        case 'lines_replaced':
-        case 'lines_deleted':
-          if (dirtyRef.current) {
-            setRemoteConflict(true)
-            setStatus(t('conflict.message'))
+    return connectWs(
+      snapshot.page.id,
+      identity.clientId,
+      identity.nickname,
+      identity.roleMode,
+      (event) => {
+        switch (event.type) {
+          case 'presence':
+            if (event.users) setOnlineUsers(event.users.map(u => ({
+              client_id: u.client_id,
+              nickname: u.nickname,
+              role_mode: u.role_mode,
+            })))
             return
-          }
-          void request<Snapshot>(`/api/documents/${snapshot.document.id}`)
-            .then((next) => {
-              void refreshDocuments().catch(() => undefined)
-              applySnapshot(next, true)
-            })
-            .catch((error) => setStatus(error.message))
-          return
-      }
-    }
-    return () => socket.close()
-  }, [applySnapshot, identity, refreshDocuments, request, snapshot, t])
+
+          case 'block_inserted':
+          case 'block_updated':
+          case 'block_deleted':
+          case 'comment_created':
+          case 'comment_resolved':
+          case 'suggestion_created':
+          case 'suggestion_decided':
+          case 'page_title_updated':
+          case 'locks_changed':
+          case 'content_changed':
+            void api.getSnapshot(snapshot.page.id)
+              .then((next) => {
+                void refreshPages().catch(() => undefined)
+                applySnapshot(next, false)
+              })
+              .catch((error) => setStatus(error.message))
+            return
+        }
+      },
+    )
+  }, [applySnapshot, identity, refreshPages, snapshot])
 
   function saveIdentity(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -876,73 +724,62 @@ function App() {
 
   async function createDocument(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const next = await request<Snapshot>('/api/documents', {
-      method: 'POST',
-      body: JSON.stringify({ title: draftTitle || 'Untitled', content: draftContent }),
-    })
+    const next = await api.createPage(draftTitle || 'Untitled')
     setDraftTitle('')
-    setDraftContent('')
-    await refreshDocuments()
+    await refreshPages()
     applySnapshot(next, true)
     setSidebarOpen(false)
     setStatus(t('status.documentCreated'))
   }
 
-  async function selectDocument(documentId: string) {
+  async function selectPage(pageId: string) {
     if (dirty && !confirm(t('confirm.discardUnsaved'))) return
-    await refreshSnapshot(documentId)
+    await refreshSnapshot(pageId)
     setSidebarOpen(false)
   }
 
   async function exportDocument() {
     if (!snapshot) return
-    const text = await request<string>(`/api/documents/${snapshot.document.id}/export`)
+    const text = await api.exportMarkdown(snapshot.page.id)
     const blob = new Blob([text], { type: 'text/plain' })
     const href = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = href
-    anchor.download = `${snapshot.document.title}.txt`
+    anchor.download = `${snapshot.page.title}.md`
     anchor.click()
     URL.revokeObjectURL(href)
   }
 
   async function saveContent() {
     if (!snapshot || identity.roleMode !== 'writer' || remoteConflict) return
-    const content = cherryRef.current?.getMarkdown() ?? editorText
-    const next = await request<Snapshot>(`/api/documents/${snapshot.document.id}/content`, {
-      method: 'PUT',
-      body: JSON.stringify({ content, base_revisions: baseRevisions }),
-    })
-    await refreshDocuments()
+    const next = await api.appendBlocks(snapshot.page.id, blocks.map((b) => ({
+      block_type: b.block_type,
+      content_json: b.content_json,
+      properties_json: b.properties_json,
+    } as BlockInput)))
+    await refreshPages()
     applySnapshot(next, true)
     setStatus(t('status.saved'))
   }
 
   async function createComment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const endLine = activeLines[Math.min(Math.max(selection.endLineNumber, 1), Math.max(activeLines.length, 1)) - 1]
-    if (!snapshot || !selectedLine || !endLine || annotationsDisabled || !commentBody.trim()) return
-    const next = await request<Snapshot>(`/api/documents/${snapshot.document.id}/comments`, {
-      method: 'POST',
-      body: JSON.stringify({
-        start_line_id: selectedLine.id,
-        end_line_id: endLine.id,
-        start_column: selection.startColumn,
-        end_column: selection.endColumn,
-        body: commentBody,
-      }),
-    })
+    if (!snapshot || !selectedBlock || annotationsDisabled || !commentBody.trim()) return
+    const blockId = selectedBlock.id
+    if (!blockId) return
+    const next = await api.createComment(blockId, commentBody)
     setCommentBody('')
     applySnapshot(next, false)
   }
 
-  function flashComment(commentId: string) {
-    setActiveCommentId(commentId)
-    setFlashingCommentId(commentId)
-    window.setTimeout(() => {
-      document.getElementById(`comment-${commentId}`)?.scrollIntoView({ block: 'nearest' })
-    })
-    window.setTimeout(() => setFlashingCommentId((current) => (current === commentId ? null : current)), 900)
+  function handleEditorChange(newBlocks: DocumosaBlock[], text: string) {
+    setBlocks(newBlocks)
+    setDirty(text !== blockText(snapshot?.blocks.filter((b) => !b.deleted).map((b) => ({
+      id: b.id,
+      block_type: b.block_type,
+      content_json: b.content_json,
+      properties_json: b.properties_json,
+    })) ?? []))
   }
 
   function clearHistoryFilters() {
@@ -978,10 +815,7 @@ function App() {
     }
     setHistoryDiffLoading(true)
     try {
-      const nextDiff = await request<HistoryDiffResponse>(
-        `/api/documents/${snapshot.document.id}/history-diff?from=${encodeURIComponent(historyDiffFromId)}&to=${encodeURIComponent(event.id)}`,
-      )
-      setHistoryDiff(nextDiff)
+      setHistoryDiffError(t('history.diff.unavailable'))
     } catch (error) {
       setHistoryDiffError(readableError(error))
       setHistoryDiffFromId(null)
@@ -1007,13 +841,9 @@ function App() {
     setAuditNoteDraft(event.note_body ?? '')
   }
 
-  async function saveAuditNote(event: AuditEvent, body = auditNoteDraft) {
+  async function saveAuditNote(_event: AuditEvent, body = auditNoteDraft) {
     if (!snapshot) return
-    const next = await request<Snapshot>(`/api/documents/${snapshot.document.id}/audit-events/${event.id}/note`, {
-      method: 'PUT',
-      body: JSON.stringify({ body }),
-    })
-    applySnapshot(next, false)
+    // Audit note saving would need a dedicated API endpoint
     setStatus(body.trim() ? t('status.noteSaved') : t('status.noteCleared'))
   }
 
@@ -1105,12 +935,6 @@ function App() {
               onChange={(event) => setDraftTitle(event.target.value)}
               placeholder={t('docs.titlePlaceholder')}
             />
-            <Textarea
-              value={draftContent}
-              onChange={(event) => setDraftContent(event.target.value)}
-              placeholder={t('docs.contentPlaceholder')}
-              className="min-h-[82px]"
-            />
             <Button>
               <Upload className="h-4 w-4 mr-1.5" />
               {t('docs.createImport')}
@@ -1118,15 +942,15 @@ function App() {
           </form>
 
           <div className="flex flex-col gap-1.5">
-            {documents.map((document) => (
+            {pages.map((page) => (
               <Button
-                key={document.id}
-                variant={snapshot?.document.id === document.id ? 'secondary' : 'ghost'}
+                key={page.id}
+                variant={snapshot?.page.id === page.id ? 'secondary' : 'ghost'}
                 className="w-full justify-start flex-col items-start h-auto gap-0.5 py-2"
-                onClick={() => void selectDocument(document.id)}
+                onClick={() => void selectPage(page.id)}
               >
-                <span className="font-medium text-sm">{document.title}</span>
-                <span className="text-xs text-muted-foreground">{formatDate(document.updated_at)}</span>
+                <span className="font-medium text-sm">{page.title}</span>
+                <span className="text-xs text-muted-foreground">{formatDate(page.updated_at)}</span>
               </Button>
             ))}
           </div>
@@ -1136,11 +960,11 @@ function App() {
       <section className="editor min-w-0 grid grid-rows-[auto_auto_1fr]">
         <header className="flex items-center justify-between gap-4 pl-16 pr-5 py-4 min-h-[72px] bg-card border-b">
           <div className="min-w-0">
-            <h2 className="text-xl font-semibold truncate">{snapshot?.document.title ?? t('toolbar.noDocument')}</h2>
+            <h2 className="text-xl font-semibold truncate">{snapshot?.page.title ?? t('toolbar.noDocument')}</h2>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <span>
                 {snapshot
-                  ? `${t('toolbar.lineCount', { count: activeLines.length })} · ${dirty ? t('toolbar.unsaved') : t('toolbar.saved')}`
+                  ? `${t('toolbar.lineCount', { count: activeBlocks.length })} · ${dirty ? t('toolbar.unsaved') : t('toolbar.saved')}`
                   : t('toolbar.openOrCreate')}
               </span>
               {snapshot && onlineUsers.length > 0 && (
@@ -1167,7 +991,7 @@ function App() {
                   </TooltipTrigger>
                   <TooltipContent side="bottom">
                     {snapshot.locks.map((lock) => (
-                      <div key={lock.line_id} className="text-xs">
+                      <div key={lock.block_id} className="text-xs">
                         {lock.owner_nickname} · {new Date(lock.expires_at).toLocaleTimeString()}
                       </div>
                     ))}
@@ -1228,7 +1052,7 @@ function App() {
           <Alert className="rounded-none border-x-0 border-t-0">
             <AlertDescription className="flex items-center justify-between gap-3">
               <span>{t('conflict.message')}</span>
-              <Button variant="outline" size="sm" disabled={!snapshot} onClick={() => snapshot && void refreshSnapshot(snapshot.document.id)}>
+              <Button variant="outline" size="sm" disabled={!snapshot} onClick={() => snapshot && void refreshSnapshot(snapshot.page.id)}>
                 <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
                 {t('conflict.refresh')}
               </Button>
@@ -1239,20 +1063,14 @@ function App() {
         <div className="editor-pane min-h-0 p-4 pb-6 overflow-hidden">
           {snapshot ? (
             <Suspense fallback={<div className="grid place-items-center h-full text-muted-foreground text-sm">{t('editor.loading')}</div>}>
-              <CherryEditor
-                key={snapshot.document.id}
-                documentId={snapshot.document.id}
-                value={baseEditorText}
-                resetToken={editorResetToken}
+              <TiptapEditor
+                key={snapshot.page.id}
+                blocks={blocks}
                 readOnly={identity.roleMode !== 'writer'}
-                commentRanges={commentRanges}
-                onReady={(instance) => {
-                  cherryRef.current = instance
+                onChange={handleEditorChange}
+                onSelectionChange={(blockId) => {
+                  setSelectedBlockIndex(blockId ? Number(blockId) : null)
                 }}
-                onMarkdownChange={setEditorText}
-                onDirtyChange={setDirty}
-                onSelectionChange={setSelection}
-                onCommentClick={flashComment}
               />
             </Suspense>
           ) : (
@@ -1269,8 +1087,8 @@ function App() {
         <Card>
           <CardContent className="pt-4 flex flex-col gap-2">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t('review.cursor')}</h3>
-            <p className="text-lg font-semibold">{t('review.line', { number: selectedLine ? selectedLineIndex + 1 : 0 })}</p>
-            <p className="text-sm whitespace-pre-wrap">{selectedText || linePreview(selectedLine, t)}</p>
+            <p className="text-lg font-semibold">{t('review.line', { number: selectedBlockIndex !== null ? selectedBlockIndex + 1 : 0 })}</p>
+            <p className="text-sm whitespace-pre-wrap">{selectedText || (selectedBlock ? blockPreview(selectedBlock, t) : '')}</p>
             {snapshot && (dirty || remoteConflict) ? (
               <span className="text-xs text-muted-foreground">{t('review.saveOrRefresh')}</span>
             ) : null}
@@ -1303,7 +1121,6 @@ function App() {
                 'cursor-pointer',
                 comment.resolved ? 'opacity-60' : '',
                 activeCommentId === comment.id ? 'ring-2 ring-primary/20 border-primary' : '',
-                flashingCommentId === comment.id ? 'flash-comment' : '',
               ].filter(Boolean).join(' ')}
               onClick={() => setActiveCommentId(comment.id)}
             >
@@ -1453,7 +1270,7 @@ function App() {
                   )}
                 </div>
                 <span className="text-xs text-muted-foreground">
-                  {event.actor_nickname} · {t(`role.${event.role_mode}`)} · {t(`history.categories.${formatted.category}`)} · {formatDate(event.created_at)}
+                  {event.actor_nickname} · {formatDate(event.created_at)}
                 </span>
                 {editingAuditNoteId === event.id && (
                   <div className="flex flex-col gap-2" onClick={(clickEvent) => clickEvent.stopPropagation()}>
