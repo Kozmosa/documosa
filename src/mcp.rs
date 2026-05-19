@@ -209,7 +209,9 @@ async fn call_tool(state: &AppState, name: &str, args: Value) -> Result<Value> {
                 content
             };
 
-            let snap = db::create_page(&state.pool, &actor, title, blocks_json).await?;
+            let title_rt = json!([{"type":"text","text":{"content":&title},"plain_text":&title}]);
+            let title_json = serde_json::to_string(&title_rt).unwrap_or_default();
+            let snap = db::create_page(&state.pool, &actor, title_json, blocks_json).await?;
             state.hub.page_created(&snap.page.id);
             (json!(snap), None)
         }

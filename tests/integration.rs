@@ -65,6 +65,11 @@ fn rich_text_json(text: &str) -> String {
     .unwrap()
 }
 
+// Build rich-text title_json for create_page from plain text
+fn title_json_text(text: &str) -> String {
+    rich_text_json(text)
+}
+
 // Build blocks JSON for create_page from plain text strings
 fn make_blocks_json(texts: &[&str]) -> String {
     let inputs: Vec<Value> = texts
@@ -479,7 +484,7 @@ async fn block_audit_details_store_summaries_counts_and_block_ids() {
     let created = documosa::db::create_page(
         &pool,
         &writer,
-        "Draft".to_string(),
+        title_json_text("Draft"),
         make_blocks_json(&[&long, "short"]),
     )
     .await
@@ -1296,9 +1301,11 @@ async fn mcp_initialize_list_and_call_work_over_http() {
         }),
     )
     .await;
-    assert_eq!(
-        created["result"]["structuredContent"]["page"]["title"],
-        "MCP Doc"
+    assert!(
+        created["result"]["structuredContent"]["page"]["title_json"]
+            .as_str()
+            .unwrap()
+            .contains("MCP Doc")
     );
     assert!(
         created["result"]["content"][0]["text"]
@@ -1764,7 +1771,7 @@ async fn cli_commands_call_server_api() {
         .stdout
         .clone();
     let created: Value = serde_json::from_slice(&create_output).unwrap();
-    let page_id = created["page"]["id"].as_str().unwrap().to_string();
+    let page_id = created["id"].as_str().unwrap().to_string();
 
     // List documents
     let list_output = Command::cargo_bin("documosa")
@@ -2136,7 +2143,7 @@ async fn page_creation_with_multiple_blocks() {
     let created = documosa::db::create_page(
         &pool,
         &writer,
-        "Multi-block".to_string(),
+        title_json_text("Multi-block"),
         make_blocks_json(&["# Title", "Paragraph text.", "> Quote"]),
     )
     .await
@@ -2428,7 +2435,7 @@ async fn mmdash_get_content_returns_blocks_and_markdown() {
     let created = documosa::db::create_page(
         &pool,
         &writer,
-        "Blocks Doc".to_string(),
+        title_json_text("Blocks Doc"),
         make_blocks_json(&["# Title", "Paragraph.", "Bullet", "Numbered", "Quote", "---"]),
     )
     .await
@@ -2474,7 +2481,7 @@ async fn mmdash_get_document_metadata() {
     let created = documosa::db::create_page(
         &pool,
         &writer,
-        "Meta Doc".to_string(),
+        title_json_text("Meta Doc"),
         make_blocks_json(&["content"]),
     )
     .await

@@ -4,6 +4,7 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use axum::extract::State;
 
@@ -71,14 +72,16 @@ async fn create_document(
 ) -> Result<impl IntoResponse> {
     let mmdash_blocks = markdown_to_blocks(&body.content);
     let blocks_json = mmdash_blocks_to_json(&mmdash_blocks)?;
-    let snapshot = db::create_page(&state.pool, &actor, body.title, blocks_json).await?;
-    let doc = snapshot.page;
+    let title_rt = json!([{"type":"text","text":{"content":body.title},"plain_text":body.title}]);
+    let title_json = serde_json::to_string(&title_rt).unwrap_or_default();
+    let snapshot = db::create_page(&state.pool, &actor, title_json, blocks_json).await?;
+    let doc = &snapshot.page;
     Ok((
         StatusCode::CREATED,
         Json(CreateDocumentResponse {
-            page_id: doc.id,
-            title: doc.title,
-            created_at: doc.created_at,
+            page_id: doc.id.clone(),
+            title: doc.plain_title(),
+            created_at: doc.created_at.clone(),
         }),
     ))
 }
@@ -88,12 +91,12 @@ async fn get_document(
     Path(document_id): Path<String>,
 ) -> Result<impl IntoResponse> {
     let snap = db::snapshot(&state.pool, &document_id).await?;
-    let doc = snap.page;
+    let doc = &snap.page;
     Ok(Json(DocumentMetadataResponse {
-        page_id: doc.id,
-        title: doc.title,
-        created_at: doc.created_at,
-        updated_at: doc.updated_at,
+        page_id: doc.id.clone(),
+        title: doc.plain_title(),
+        created_at: doc.created_at.clone(),
+        updated_at: doc.updated_at.clone(),
     }))
 }
 
@@ -105,8 +108,8 @@ async fn get_content(
     let blocks = blocks_from_snapshot(&snap);
     let markdown = blocks_to_markdown(&blocks);
     Ok(Json(ContentResponse {
-        page_id: snap.page.id,
-        title: snap.page.title,
+        page_id: snap.page.id.clone(),
+        title: snap.page.plain_title(),
         blocks,
         markdown,
     }))
@@ -119,7 +122,9 @@ async fn update_content(
     Json(body): Json<UpdateContentRequest>,
 ) -> Result<impl IntoResponse> {
     if let Some(title) = &body.title {
-        db::update_page_title(&state.pool, &actor, &document_id, title).await?;
+        let title_rt = json!([{"type":"text","text":{"content":title},"plain_text":title}]);
+        let title_json = serde_json::to_string(&title_rt).unwrap_or_default();
+        db::update_page_title(&state.pool, &actor, &document_id, &title_json).await?;
         state.hub.title_updated(&document_id, title);
     }
 
@@ -134,8 +139,8 @@ async fn update_content(
     let result_blocks = blocks_from_snapshot(&snap);
     let result_markdown = blocks_to_markdown(&result_blocks);
     Ok(Json(ContentResponse {
-        page_id: snap.page.id,
-        title: snap.page.title,
+        page_id: snap.page.id.clone(),
+        title: snap.page.plain_title(),
         blocks: result_blocks,
         markdown: result_markdown,
     }))
