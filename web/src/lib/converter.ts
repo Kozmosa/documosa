@@ -2,7 +2,7 @@ import type { JSONContent } from '@tiptap/core'
 
 interface RichTextToken {
   type: string
-  text?: { content: string; link?: string | null }
+  text?: { content: string; link?: { type: string; url: string } | null }
   annotations?: Annotations
   plain_text: string
   href?: string | null
@@ -44,12 +44,13 @@ function marksToAnnotations(marks?: { type: string; attrs?: Record<string, unkno
 // ProseMirror JSON -> RichText token
 function proseMirrorTextToRichText(node: JSONContent): RichTextToken[] {
   if (node.type === 'text') {
+    const href = node.marks?.find(m => m.type === 'link')?.attrs?.href as string | null
     return [{
       type: 'text',
-      text: { content: node.text || '', link: node.marks?.find(m => m.type === 'link')?.attrs?.href as string | null },
+      text: { content: node.text || '', link: href ? { type: 'url', url: href } : null },
       annotations: marksToAnnotations(node.marks?.filter(m => m.type !== 'link') as { type: string; attrs?: Record<string, unknown> }[]),
       plain_text: node.text || '',
-      href: node.marks?.find(m => m.type === 'link')?.attrs?.href as string | null,
+      href,
     }]
   }
   if (node.type === 'hardBreak') {
