@@ -9,7 +9,7 @@ import { useTranslation } from 'react-i18next'
 import type { Locale } from './i18n'
 import './App.css'
 
-import { api } from '@/lib/api'
+import { api, pageTitle } from '@/lib/api'
 import type { Page, PageSnapshot, Comment, CommentReply, AuditEvent, Block, BlockInput } from '@/lib/api'
 import { connectWs } from '@/lib/ws'
 import type { PresenceUser } from '@/lib/ws'
@@ -745,7 +745,7 @@ function App() {
     const href = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = href
-    anchor.download = `${snapshot.page.title}.md`
+    anchor.download = `${pageTitle(snapshot.page)}.md`
     anchor.click()
     URL.revokeObjectURL(href)
   }
@@ -949,8 +949,8 @@ function App() {
                 className="w-full justify-start flex-col items-start h-auto gap-0.5 py-2"
                 onClick={() => void selectPage(page.id)}
               >
-                <span className="font-medium text-sm">{page.title}</span>
-                <span className="text-xs text-muted-foreground">{formatDate(page.updated_at)}</span>
+                <span className="font-medium text-sm">{pageTitle(page)}</span>
+                <span className="text-xs text-muted-foreground">{formatDate(page.last_edited_time)}</span>
               </Button>
             ))}
           </div>
@@ -960,7 +960,7 @@ function App() {
       <section className="editor min-w-0 grid grid-rows-[auto_auto_1fr]">
         <header className="flex items-center justify-between gap-4 pl-16 pr-5 py-4 min-h-[72px] bg-card border-b">
           <div className="min-w-0">
-            <h2 className="text-xl font-semibold truncate">{snapshot?.page.title ?? t('toolbar.noDocument')}</h2>
+            <h2 className="text-xl font-semibold truncate">{snapshot ? pageTitle(snapshot.page) : t('toolbar.noDocument')}</h2>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <span>
                 {snapshot

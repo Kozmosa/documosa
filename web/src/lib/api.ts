@@ -45,7 +45,41 @@ export const api = {
 }
 
 // Types
-export interface Page { id: string; title: string; properties_json: string; created_at: string; updated_at: string }
+export interface Page {
+    object: string
+    id: string
+    created_time: string
+    last_edited_time: string
+    properties: {
+        title: {
+            id: string
+            type: string
+            title: RichTextToken[]
+        }
+    }
+    properties_json: string
+}
+
+interface RichTextToken {
+    type: string
+    text?: { content: string; link?: { type: string; url: string } | null }
+    annotations?: Annotations
+    plain_text: string
+    href?: string | null
+}
+
+interface Annotations {
+    bold: boolean
+    italic: boolean
+    strikethrough: boolean
+    underline: boolean
+    code: boolean
+    color: string
+}
+
+export function pageTitle(page: Page): string {
+    return page.properties?.title?.title?.map(t => t.plain_text).join('') || ''
+}
 export interface Block { id: string; page_id: string; parent_id: string | null; order_index: number; block_type: string; content_json: string; properties_json: string; revision: number; deleted: boolean }
 export interface BlockInput { block_type: string; content_json: string; properties_json?: string }
 export interface PageSnapshot { page: Page; blocks: Block[]; comments: Comment[]; replies: CommentReply[]; suggestions: unknown[]; locks: BlockLock[]; audit_events: AuditEvent[] }
