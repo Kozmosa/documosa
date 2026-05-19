@@ -33,7 +33,6 @@ mod permission;
 pub(crate) use permission::require_permission;
 
 mod validate;
-pub(crate) use validate::validate_block_input;
 
 use crate::error::Result;
 
