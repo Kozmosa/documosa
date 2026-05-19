@@ -7,6 +7,9 @@ const VALID_BLOCK_TYPES: &[&str] = &[
     "code", "equation", "quote", "callout", "divider",
     "image", "table", "table_row", "column_list", "column",
     "child_page",
+    "bookmark", "embed", "link_preview", "link_to_page",
+    "video", "pdf", "file", "audio",
+    "synced_block", "template", "breadcrumb", "child_database",
 ];
 
 pub(crate) fn validate_block_input(input: &super::block::BlockInput) -> Result<()> {
