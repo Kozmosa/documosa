@@ -32,6 +32,9 @@ mod ops;
 mod permission;
 pub(crate) use permission::require_permission;
 
+mod validate;
+pub(crate) use validate::validate_block_input;
+
 use crate::error::Result;
 
 const AUDIT_NOTE_MAX_CHARS: usize = 2000;

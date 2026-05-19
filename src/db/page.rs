@@ -69,12 +69,13 @@ pub async fn create_page(
 }
 
 pub async fn get_page(pool: &SqlitePool, page_id: &str) -> Result<Page> {
-    Ok(sqlx::query_as::<_, Page>(
+    sqlx::query_as::<_, Page>(
         "SELECT id, title, properties_json, created_at, updated_at FROM pages WHERE id = ?",
     )
     .bind(page_id)
-    .fetch_one(pool)
-    .await?)
+    .fetch_optional(pool)
+    .await?
+    .ok_or(AppError::NotFound)
 }
 
 pub async fn list_pages(pool: &SqlitePool) -> Result<Vec<Page>> {

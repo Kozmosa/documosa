@@ -15,12 +15,13 @@ pub struct BlockInput {
 }
 
 pub async fn get_block(pool: &SqlitePool, block_id: &str) -> Result<Block> {
-    Ok(sqlx::query_as::<_, Block>(
+    sqlx::query_as::<_, Block>(
         "SELECT id, page_id, parent_id, order_index, block_type, content_json, properties_json, revision, deleted, created_at, updated_at FROM blocks WHERE id = ? AND deleted = 0",
     )
     .bind(block_id)
-    .fetch_one(pool)
-    .await?)
+    .fetch_optional(pool)
+    .await?
+    .ok_or(AppError::NotFound)
 }
 
 pub async fn list_children(
@@ -96,6 +97,10 @@ pub async fn append_blocks(
 ) -> Result<PageSnapshot> {
     if blocks.is_empty() {
         return Err(AppError::BadRequest("at least one block is required".into()));
+    }
+
+    for input in &blocks {
+        super::validate::validate_block_input(input)?;
     }
 
     let mut tx = begin_write_tx(pool).await?;
@@ -217,6 +222,16 @@ pub async fn update_block(
     {
         let bid = block_id.to_string();
         super::lock::ensure_unlocked_tx(&mut tx, actor, &page_id, std::slice::from_ref(&bid)).await?;
+    }
+
+    // Validate when content_json or block_type is being changed
+    if content_json.is_some() || block_type.is_some() {
+        let check_input = super::block::BlockInput {
+            block_type: block_type.unwrap_or(&block.block_type).to_string(),
+            content_json: content_json.unwrap_or(&block.content_json).to_string(),
+            properties_json: properties_json.map(|s| s.to_string()),
+        };
+        super::validate::validate_block_input(&check_input)?;
     }
 
     let timestamp = now();
@@ -381,12 +396,13 @@ pub(crate) async fn get_block_tx(
     tx: &mut Transaction<'_, Sqlite>,
     block_id: &str,
 ) -> Result<Block> {
-    Ok(sqlx::query_as::<_, Block>(
+    sqlx::query_as::<_, Block>(
         "SELECT id, page_id, parent_id, order_index, block_type, content_json, properties_json, revision, deleted, created_at, updated_at FROM blocks WHERE id = ? AND deleted = 0",
     )
     .bind(block_id)
-    .fetch_one(&mut **tx)
-    .await?)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(AppError::NotFound)
 }
 
 // ── private helpers ──
@@ -399,8 +415,9 @@ async fn get_order_tx(
         "SELECT order_index FROM blocks WHERE id = ? AND deleted = 0",
     )
     .bind(block_id)
-    .fetch_one(&mut **tx)
-    .await?;
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(AppError::NotFound)?;
     Ok(row.0)
 }
 

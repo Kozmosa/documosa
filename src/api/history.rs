@@ -5,6 +5,7 @@ use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
+use crate::api::{wrap_list, wrap_object};
 use crate::AppState;
 use crate::db;
 use crate::error::{AppError, Result};
@@ -44,9 +45,8 @@ async fn list_history(
             .transpose()?,
         limit: query.limit.unwrap_or(db::HISTORY_DEFAULT_LIMIT),
     };
-    Ok(Json(
-        db::list_history_events(&state.pool, &page_id, options).await?,
-    ))
+    let events = db::list_history_events(&state.pool, &page_id, options).await?;
+    Ok(Json(wrap_list(serde_json::to_value(events).unwrap())))
 }
 
 #[derive(Deserialize)]
@@ -61,9 +61,8 @@ async fn history_diff(
     Path(page_id): Path<String>,
     Query(query): Query<HistoryDiffQuery>,
 ) -> Result<impl IntoResponse> {
-    Ok(Json(
-        db::history_diff(&state.pool, &page_id, &query.from, &query.to).await?,
-    ))
+    let diff = db::history_diff(&state.pool, &page_id, &query.from, &query.to).await?;
+    Ok(Json(wrap_object("page", diff)))
 }
 
 #[derive(Deserialize)]
@@ -79,7 +78,7 @@ async fn set_note(
 ) -> Result<impl IntoResponse> {
     let snap = db::put_audit_event_note(&state.pool, &actor, &page_id, &event_id, body.body).await?;
     state.hub.content_changed(&page_id);
-    Ok(Json(snap))
+    Ok(Json(wrap_object("page", snap)))
 }
 
 fn normalize_timestamp(name: &str, value: &str) -> Result<String> {

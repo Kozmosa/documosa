@@ -4,6 +4,7 @@ use axum::routing::post;
 use axum::{Json, Router};
 use serde::Deserialize;
 
+use crate::api::wrap_object;
 use crate::AppState;
 use crate::db;
 use crate::error::Result;
@@ -40,7 +41,7 @@ async fn create_suggestion(
     )
     .await?;
     state.hub.suggestion_created(&page_id, snap.suggestions.last().unwrap().id.as_str());
-    Ok(Json(snap))
+    Ok(Json(wrap_object("page", snap)))
 }
 
 async fn accept_suggestion(
@@ -50,7 +51,7 @@ async fn accept_suggestion(
 ) -> Result<impl IntoResponse> {
     let snap = db::decide_suggestion(&state.pool, &actor, &page_id, &suggestion_id, true).await?;
     state.hub.suggestion_decided(&page_id, &suggestion_id, true);
-    Ok(Json(snap))
+    Ok(Json(wrap_object("page", snap)))
 }
 
 async fn reject_suggestion(
@@ -60,5 +61,5 @@ async fn reject_suggestion(
 ) -> Result<impl IntoResponse> {
     let snap = db::decide_suggestion(&state.pool, &actor, &page_id, &suggestion_id, false).await?;
     state.hub.suggestion_decided(&page_id, &suggestion_id, false);
-    Ok(Json(snap))
+    Ok(Json(wrap_object("page", snap)))
 }

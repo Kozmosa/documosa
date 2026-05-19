@@ -5,6 +5,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 
+use crate::api::{wrap_list, wrap_object};
 use crate::AppState;
 use crate::db;
 use crate::error::Result;
@@ -36,14 +37,15 @@ async fn create_page(
 ) -> Result<impl IntoResponse> {
     let snap = db::create_page(&state.pool, &actor, body.title, body.content_json).await?;
     state.hub.page_created(&snap.page.id);
-    Ok((StatusCode::CREATED, Json(snap)))
+    Ok((StatusCode::CREATED, Json(wrap_object("page", snap))))
 }
 
 async fn list_pages(
     State(state): State<AppState>,
     MmdashIdentity(_actor): MmdashIdentity,
 ) -> Result<impl IntoResponse> {
-    Ok(Json(db::list_pages(&state.pool).await?))
+    let pages = db::list_pages(&state.pool).await?;
+    Ok(Json(wrap_list(serde_json::to_value(pages).unwrap())))
 }
 
 async fn get_page(
@@ -51,7 +53,8 @@ async fn get_page(
     MmdashIdentity(_actor): MmdashIdentity,
     Path(page_id): Path<String>,
 ) -> Result<impl IntoResponse> {
-    Ok(Json(db::get_page(&state.pool, &page_id).await?))
+    let page = db::get_page(&state.pool, &page_id).await?;
+    Ok(Json(wrap_object("page", page)))
 }
 
 async fn update_page(
@@ -64,7 +67,8 @@ async fn update_page(
         db::update_page_title(&state.pool, &actor, &page_id, title).await?;
         state.hub.title_updated(&page_id, title);
     }
-    Ok(Json(db::get_page(&state.pool, &page_id).await?))
+    let page = db::get_page(&state.pool, &page_id).await?;
+    Ok(Json(wrap_object("page", page)))
 }
 
 async fn get_snapshot(
@@ -72,5 +76,6 @@ async fn get_snapshot(
     MmdashIdentity(_actor): MmdashIdentity,
     Path(page_id): Path<String>,
 ) -> Result<impl IntoResponse> {
-    Ok(Json(db::snapshot(&state.pool, &page_id).await?))
+    let snapshot = db::snapshot(&state.pool, &page_id).await?;
+    Ok(Json(wrap_object("page", snapshot)))
 }

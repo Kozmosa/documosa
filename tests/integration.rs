@@ -1046,32 +1046,33 @@ async fn history_api_lists_and_filters_events() {
 
     let all = get_json_auth(
         app.clone(),
-        &format!("/pages/{page_id}/history?category=all&limit=10"),
+        &format!("/v1/pages/{page_id}/history?category=all&limit=10"),
         &token,
     )
     .await;
-    let all_events = all.as_array().unwrap();
-    assert_eq!(all_events.len(), 5);
+    assert_eq!(all["object"], "list");
+    let all_results = all["results"].as_array().unwrap();
+    assert_eq!(all_results.len(), 5);
     assert!(
-        all_events
+        all_results
             .iter()
             .any(|event| event["event_type"] == "suggestion.created")
     );
     assert!(
-        all_events
+        all_results
             .iter()
             .any(|event| event["event_type"] == "locks.heartbeat")
     );
 
     let default = get_json_auth(
         app.clone(),
-        &format!("/pages/{page_id}/history"),
+        &format!("/v1/pages/{page_id}/history"),
         &token,
     )
     .await;
-    let default_event_types: Vec<_> = default
-        .as_array()
-        .unwrap()
+    assert_eq!(default["object"], "list");
+    let default_results = default["results"].as_array().unwrap();
+    let default_event_types: Vec<_> = default_results
         .iter()
         .map(|event| event["event_type"].as_str().unwrap())
         .collect();
@@ -1083,37 +1084,40 @@ async fn history_api_lists_and_filters_events() {
 
     let limited = get_json_auth(
         app.clone(),
-        &format!("/pages/{page_id}/history?category=all&limit=2"),
+        &format!("/v1/pages/{page_id}/history?category=all&limit=2"),
         &token,
     )
     .await;
-    assert_eq!(limited.as_array().unwrap().len(), 2);
+    assert_eq!(limited["object"], "list");
+    assert_eq!(limited["results"].as_array().unwrap().len(), 2);
 
     let suggestions = get_json_auth(
         app.clone(),
-        &format!("/pages/{page_id}/history?category=suggestion"),
+        &format!("/v1/pages/{page_id}/history?category=suggestion"),
         &token,
     )
     .await;
-    assert_eq!(suggestions.as_array().unwrap().len(), 1);
+    assert_eq!(suggestions["object"], "list");
+    assert_eq!(suggestions["results"].as_array().unwrap().len(), 1);
     assert_eq!(
-        suggestions.as_array().unwrap()[0]["event_type"],
+        suggestions["results"].as_array().unwrap()[0]["event_type"],
         "suggestion.created"
     );
 
     let system = get_json_auth(
         app.clone(),
-        &format!("/pages/{page_id}/history?category=system"),
+        &format!("/v1/pages/{page_id}/history?category=system"),
         &token,
     )
     .await;
-    assert_eq!(system.as_array().unwrap().len(), 1);
+    assert_eq!(system["object"], "list");
+    assert_eq!(system["results"].as_array().unwrap().len(), 1);
     assert_eq!(
-        system.as_array().unwrap()[0]["event_type"],
+        system["results"].as_array().unwrap()[0]["event_type"],
         "locks.heartbeat"
     );
 
-    let suggestion_time = all_events
+    let suggestion_time = all_results
         .iter()
         .find(|event| event["event_type"] == "suggestion.created")
         .unwrap()["created_at"]
@@ -1123,14 +1127,14 @@ async fn history_api_lists_and_filters_events() {
     let from_suggestion = get_json_auth(
         app.clone(),
         &format!(
-            "/pages/{page_id}/history?category=all&from={suggestion_time}"
+            "/v1/pages/{page_id}/history?category=all&from={suggestion_time}"
         ),
         &token,
     )
     .await;
-    let from_event_types: Vec<_> = from_suggestion
-        .as_array()
-        .unwrap()
+    assert_eq!(from_suggestion["object"], "list");
+    let from_results = from_suggestion["results"].as_array().unwrap();
+    let from_event_types: Vec<_> = from_results
         .iter()
         .map(|event| event["event_type"].as_str().unwrap())
         .collect();
@@ -1142,7 +1146,7 @@ async fn history_api_lists_and_filters_events() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri(format!("/pages/{page_id}/history?from=not-a-date"))
+                .uri(format!("/v1/pages/{page_id}/history?from=not-a-date"))
                 .header(header::AUTHORIZATION, format!("Bearer {token}"))
                 .body(Body::empty())
                 .unwrap(),
@@ -1179,7 +1183,7 @@ async fn history_api_rejects_limit_edges_and_empty_time_windows() {
                 Request::builder()
                     .method("GET")
                     .uri(format!(
-                        "/pages/{page_id}/history?category=all&limit={limit}"
+                        "/v1/pages/{page_id}/history?category=all&limit={limit}"
                     ))
                     .header(header::AUTHORIZATION, format!("Bearer {token}"))
                     .body(Body::empty())
@@ -1193,12 +1197,12 @@ async fn history_api_rejects_limit_edges_and_empty_time_windows() {
     let empty = get_json_auth(
         app,
         &format!(
-            "/pages/{page_id}/history?category=all&from=2999-01-01T00:00:00Z&to={event_time}"
+            "/v1/pages/{page_id}/history?category=all&from=2999-01-01T00:00:00Z&to={event_time}"
         ),
         &token,
     )
     .await;
-    assert_eq!(empty.as_array().unwrap().len(), 0);
+    assert_eq!(empty["results"].as_array().unwrap().len(), 0);
 }
 
 #[tokio::test]
@@ -1831,7 +1835,7 @@ async fn cli_commands_call_server_api() {
         .stdout
         .clone();
     let history: Value = serde_json::from_slice(&history_output).unwrap();
-    let history_events = history.as_array().unwrap();
+    let history_events = history["results"].as_array().unwrap();
     let created_event_id = history_events
         .iter()
         .find(|event| event["event_type"] == "page.created")
@@ -1873,7 +1877,7 @@ async fn cli_commands_call_server_api() {
         .clone();
     let suggestion_history: Value = serde_json::from_slice(&suggestion_history_output).unwrap();
     assert_eq!(
-        suggestion_history.as_array().unwrap()[0]["event_type"],
+        suggestion_history["results"].as_array().unwrap()[0]["event_type"],
         "suggestion.created"
     );
 
@@ -2106,7 +2110,7 @@ async fn export_page_returns_not_found_for_unknown_id() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/pages/not-a-real-id/export/md")
+                .uri("/v1/pages/not-a-real-id/export/md")
                 .header(header::AUTHORIZATION, format!("Bearer {token}"))
                 .body(Body::empty())
                 .unwrap(),
@@ -2376,7 +2380,9 @@ async fn mmdash_rejects_invalid_jwt() {
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body: Value = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(body["error"], "unauthorized");
+    assert_eq!(body["object"], "error");
+    assert_eq!(body["status"], 401);
+    assert_eq!(body["code"], "unauthorized");
 }
 
 #[tokio::test]

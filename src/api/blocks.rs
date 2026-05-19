@@ -2,8 +2,10 @@ use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
 use axum::routing::{get, patch};
 use axum::{Json, Router};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde::{Deserialize, Serialize};
 
+use crate::api::wrap_object;
 use crate::AppState;
 use crate::db;
 use crate::error::Result;
@@ -22,19 +24,21 @@ async fn get_block(
     MmdashIdentity(_actor): MmdashIdentity,
     Path(block_id): Path<String>,
 ) -> Result<impl IntoResponse> {
-    Ok(Json(db::get_block(&state.pool, &block_id).await?))
+    let block = db::get_block(&state.pool, &block_id).await?;
+    Ok(Json(wrap_object("block", block)))
 }
 
 #[derive(Deserialize)]
 struct ListChildrenQuery {
     page_size: Option<i64>,
-    start_cursor: Option<f64>,
+    start_cursor: Option<String>,
 }
 
 #[derive(Serialize)]
 struct ListChildrenResponse {
+    object: &'static str,
     results: Vec<Block>,
-    next_cursor: Option<f64>,
+    next_cursor: Option<String>,
     has_more: bool,
 }
 
@@ -46,17 +50,24 @@ async fn list_children(
 ) -> Result<impl IntoResponse> {
     let block = db::get_block(&state.pool, &block_id).await?;
     let page_size = query.page_size.unwrap_or(50).max(1).min(100);
+    let cursor: Option<f64> = query
+        .start_cursor
+        .and_then(|s| BASE64.decode(s).ok())
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .and_then(|s| s.parse().ok());
     let (blocks, next_cursor, has_more) = db::list_children(
         &state.pool,
         Some(&block_id),
         &block.page_id,
-        query.start_cursor,
+        cursor,
         page_size,
     )
     .await?;
+    let encoded_cursor = next_cursor.map(|order| BASE64.encode(order.to_string()));
     Ok(Json(ListChildrenResponse {
+        object: "list",
         results: blocks,
-        next_cursor,
+        next_cursor: encoded_cursor,
         has_more,
     }))
 }
@@ -84,7 +95,7 @@ async fn update_block(
     )
     .await?;
     state.hub.block_updated(&snap.page.id, &block_id);
-    Ok(Json(snap))
+    Ok(Json(wrap_object("page", snap)))
 }
 
 async fn delete_block(
@@ -94,7 +105,7 @@ async fn delete_block(
 ) -> Result<impl IntoResponse> {
     let snap = db::delete_block(&state.pool, &actor, &block_id).await?;
     state.hub.block_deleted(&snap.page.id, &[block_id]);
-    Ok(Json(snap))
+    Ok(Json(wrap_object("page", snap)))
 }
 
 #[derive(Deserialize)]
@@ -129,5 +140,5 @@ async fn append_blocks(
         .collect();
     let snap = db::append_blocks(&state.pool, &actor, &page_id, block_inputs, body.after.as_deref()).await?;
     state.hub.block_inserted(&page_id, &[], body.after.as_deref());
-    Ok(Json(snap))
+    Ok(Json(wrap_object("page", snap)))
 }

@@ -5,6 +5,7 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
+use crate::api::wrap_object;
 use crate::AppState;
 use crate::db;
 use crate::error::Result;
@@ -51,11 +52,12 @@ async fn create_comment(
     )
     .await?;
     state.hub.comment_created(&page_id, snap.comments.last().unwrap().id.as_str());
-    Ok(Json(snap))
+    Ok(Json(wrap_object("page", snap)))
 }
 
 #[derive(Serialize)]
 struct BlockCommentsResponse {
+    object: &'static str,
     comments: Vec<Comment>,
     replies: Vec<CommentReply>,
 }
@@ -91,7 +93,11 @@ async fn list_comments(
             .await?
     };
 
-    Ok(Json(BlockCommentsResponse { comments, replies }))
+    Ok(Json(BlockCommentsResponse {
+        object: "list",
+        comments,
+        replies,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -108,7 +114,7 @@ async fn update_comment(
     let page_id = resolve_page_from_block(&state.pool, &block_id).await?;
     let snap = db::update_comment(&state.pool, &actor, &page_id, &comment_id, body.body).await?;
     state.hub.content_changed(&page_id);
-    Ok(Json(snap))
+    Ok(Json(wrap_object("page", snap)))
 }
 
 async fn delete_comment(
@@ -119,7 +125,7 @@ async fn delete_comment(
     let page_id = resolve_page_from_block(&state.pool, &block_id).await?;
     let snap = db::delete_comment(&state.pool, &actor, &page_id, &comment_id).await?;
     state.hub.content_changed(&page_id);
-    Ok(Json(snap))
+    Ok(Json(wrap_object("page", snap)))
 }
 
 #[derive(Deserialize)]
@@ -136,7 +142,7 @@ async fn reply_comment(
     let page_id = resolve_page_from_block(&state.pool, &block_id).await?;
     let snap = db::reply_comment(&state.pool, &actor, &page_id, &comment_id, body.body).await?;
     state.hub.content_changed(&page_id);
-    Ok(Json(snap))
+    Ok(Json(wrap_object("page", snap)))
 }
 
 async fn resolve_comment(
@@ -147,5 +153,5 @@ async fn resolve_comment(
     let page_id = resolve_page_from_block(&state.pool, &block_id).await?;
     let snap = db::resolve_comment(&state.pool, &actor, &page_id, &comment_id).await?;
     state.hub.comment_resolved(&page_id, &comment_id);
-    Ok(Json(snap))
+    Ok(Json(wrap_object("page", snap)))
 }

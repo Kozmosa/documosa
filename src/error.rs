@@ -30,40 +30,42 @@ pub enum AppError {
 
 #[derive(Serialize)]
 struct ErrorBody {
-    error: String,
+    object: String,
+    status: u16,
+    code: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     message: Option<String>,
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let status = match &self {
-            AppError::Protocol(ProtocolError::BadRequest(_)) => StatusCode::BAD_REQUEST,
-            AppError::Protocol(ProtocolError::Forbidden(_)) => StatusCode::FORBIDDEN,
-            AppError::Protocol(ProtocolError::Conflict(_)) => StatusCode::CONFLICT,
-            AppError::Protocol(ProtocolError::NotFound) => StatusCode::NOT_FOUND,
-            AppError::BadRequest(_) => StatusCode::BAD_REQUEST,
-            AppError::Forbidden(_) => StatusCode::FORBIDDEN,
-            AppError::Conflict(_) => StatusCode::CONFLICT,
-            AppError::Unauthorized => StatusCode::UNAUTHORIZED,
-            AppError::NotFound => StatusCode::NOT_FOUND,
-            AppError::Sqlx(sqlx::Error::RowNotFound) => StatusCode::NOT_FOUND,
-            AppError::Sqlx(_) | AppError::Io(_) | AppError::Json(_) | AppError::Anyhow(_) => {
-                StatusCode::INTERNAL_SERVER_ERROR
+        let (status, code, message) = match &self {
+            AppError::Protocol(ProtocolError::BadRequest(msg)) => {
+                (StatusCode::BAD_REQUEST, "validation_error", Some(msg.clone()))
             }
-        };
-        let error = self.to_string();
-        let message = match &self {
-            AppError::Protocol(ProtocolError::BadRequest(msg))
-            | AppError::Protocol(ProtocolError::Forbidden(msg))
-            | AppError::Protocol(ProtocolError::Conflict(msg)) => Some(msg.clone()),
-            AppError::BadRequest(msg) | AppError::Forbidden(msg) | AppError::Conflict(msg) => {
-                Some(msg.clone())
+            AppError::Protocol(ProtocolError::Forbidden(msg)) => {
+                (StatusCode::FORBIDDEN, "restricted_resource", Some(msg.clone()))
             }
-            AppError::Unauthorized => Some("invalid token".into()),
-            _ => None,
+            AppError::Protocol(ProtocolError::Conflict(msg)) => {
+                (StatusCode::CONFLICT, "conflict_error", Some(msg.clone()))
+            }
+            AppError::Protocol(ProtocolError::NotFound) => {
+                (StatusCode::NOT_FOUND, "object_not_found", None)
+            }
+            AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, "validation_error", Some(msg.clone())),
+            AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, "restricted_resource", Some(msg.clone())),
+            AppError::Conflict(msg) => (StatusCode::CONFLICT, "conflict_error", Some(msg.clone())),
+            AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized", None),
+            AppError::NotFound => (StatusCode::NOT_FOUND, "object_not_found", None),
+            AppError::Sqlx(sqlx::Error::RowNotFound) => (StatusCode::NOT_FOUND, "object_not_found", None),
+            _ => (StatusCode::INTERNAL_SERVER_ERROR, "internal_server_error", None),
         };
-        let body = Json(ErrorBody { error, message });
+        let body = Json(ErrorBody {
+            object: "error".into(),
+            status: status.as_u16(),
+            code: code.into(),
+            message,
+        });
         (status, body).into_response()
     }
 }

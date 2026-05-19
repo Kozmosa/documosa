@@ -367,7 +367,7 @@ async fn run_document(command: DocumentCommand) -> anyhow::Result<()> {
                     require_parent_page_id(args.notion_parent_page_id.as_deref())?;
                 print_json(notion.list_documents(parent_page_id).await?)
             } else {
-                print_json(request(&args.client, reqwest::Method::GET, "/pages", ()).await?)
+                print_json(request(&args.client, reqwest::Method::GET, "/v1/pages", ()).await?)
             }
         }
         DocumentCommand::Create(args) => {
@@ -384,7 +384,7 @@ async fn run_document(command: DocumentCommand) -> anyhow::Result<()> {
                     request(
                         &args.client,
                         reqwest::Method::POST,
-                        "/pages",
+                        "/v1/pages",
                         json!({ "title": args.title, "content_json": args.content }),
                     )
                     .await?,
@@ -406,7 +406,7 @@ async fn run_document(command: DocumentCommand) -> anyhow::Result<()> {
                     request(
                         &args.client,
                         reqwest::Method::POST,
-                        "/pages",
+                        "/v1/pages",
                         json!({ "title": args.title, "content_json": content }),
                     )
                     .await?,
@@ -421,7 +421,7 @@ async fn run_document(command: DocumentCommand) -> anyhow::Result<()> {
                     request(
                         &args.client,
                         reqwest::Method::GET,
-                        &format!("/pages/{}/snapshot", args.document_id),
+                        &format!("/v1/pages/{}/snapshot", args.document_id),
                         (),
                     )
                     .await?,
@@ -437,7 +437,7 @@ async fn run_document(command: DocumentCommand) -> anyhow::Result<()> {
                 let value: serde_json::Value = request(
                     &args.client,
                     reqwest::Method::GET,
-                    &format!("/pages/{}/export/md", args.document_id),
+                    &format!("/v1/pages/{}/export/md", args.document_id),
                     (),
                 )
                 .await?;
@@ -480,7 +480,7 @@ async fn run_line(command: LineCommand) -> anyhow::Result<()> {
                     request(
                         &args.client,
                         reqwest::Method::PATCH,
-                        &format!("/pages/{}/children", args.document_id),
+                        &format!("/v1/pages/{}/children", args.document_id),
                         json!({ "children": children, "after": args.after_line_id }),
                     )
                     .await?,
@@ -508,7 +508,7 @@ async fn run_line(command: LineCommand) -> anyhow::Result<()> {
                         request(
                             &args.client,
                             reqwest::Method::PATCH,
-                            &format!("/blocks/{}", block_id),
+                            &format!("/v1/blocks/{}", block_id),
                             json!({ "content_json": content_json }),
                         )
                         .await?,
@@ -530,7 +530,7 @@ async fn run_line(command: LineCommand) -> anyhow::Result<()> {
                     let snap: serde_json::Value = request(
                         &args.client,
                         reqwest::Method::DELETE,
-                        &format!("/blocks/{}", block_id),
+                        &format!("/v1/blocks/{}", block_id),
                         json!({}),
                     )
                     .await?;
@@ -552,7 +552,7 @@ async fn run_comment(command: CommentCommand) -> anyhow::Result<()> {
             request(
                 &args.client,
                 reqwest::Method::POST,
-                &format!("/blocks/{}/comments", args.block_id),
+                &format!("/v1/blocks/{}/comments", args.block_id),
                 json!({
                     "body": args.body,
                     "start_column": args.start_column,
@@ -565,7 +565,7 @@ async fn run_comment(command: CommentCommand) -> anyhow::Result<()> {
             request(
                 &args.client,
                 reqwest::Method::POST,
-                &format!("/blocks/{}/comments/{}/replies", args.block_id, args.comment_id),
+                &format!("/v1/blocks/{}/comments/{}/replies", args.block_id, args.comment_id),
                 json!({ "body": args.body }),
             )
             .await?,
@@ -574,7 +574,7 @@ async fn run_comment(command: CommentCommand) -> anyhow::Result<()> {
             request(
                 &args.client,
                 reqwest::Method::POST,
-                &format!("/blocks/{}/comments/{}/resolve", args.block_id, args.comment_id),
+                &format!("/v1/blocks/{}/comments/{}/resolve", args.block_id, args.comment_id),
                 json!({}),
             )
             .await?,
@@ -591,7 +591,7 @@ async fn run_suggestion(command: SuggestionCommand) -> anyhow::Result<()> {
             request(
                 &args.client,
                 reqwest::Method::POST,
-                &format!("/pages/{}/suggestions", args.document_id),
+                &format!("/v1/pages/{}/suggestions", args.document_id),
                 json!({
                     "kind": args.kind,
                     "target_block_id": args.target_block_id,
@@ -604,7 +604,7 @@ async fn run_suggestion(command: SuggestionCommand) -> anyhow::Result<()> {
             request(
                 &args.client,
                 reqwest::Method::POST,
-                &format!("/pages/{}/suggestions/{}/accept", args.document_id, args.suggestion_id),
+                &format!("/v1/pages/{}/suggestions/{}/accept", args.document_id, args.suggestion_id),
                 json!({}),
             )
             .await?,
@@ -613,7 +613,7 @@ async fn run_suggestion(command: SuggestionCommand) -> anyhow::Result<()> {
             request(
                 &args.client,
                 reqwest::Method::POST,
-                &format!("/pages/{}/suggestions/{}/reject", args.document_id, args.suggestion_id),
+                &format!("/v1/pages/{}/suggestions/{}/reject", args.document_id, args.suggestion_id),
                 json!({}),
             )
             .await?,
@@ -640,7 +640,7 @@ async fn run_history(command: HistoryCommand) -> anyhow::Result<()> {
                 &args.client,
                 reqwest::Method::GET,
                 &format!(
-                    "/pages/{}/history-diff?from={}&to={}",
+                    "/v1/pages/{}/history-diff?from={}&to={}",
                     args.document_id,
                     query_component(&args.from),
                     query_component(&args.to)
@@ -661,7 +661,7 @@ async fn run_history(command: HistoryCommand) -> anyhow::Result<()> {
                     &args.client,
                     reqwest::Method::POST,
                     &format!(
-                        "/pages/{}/audit/{}/note",
+                        "/v1/pages/{}/audit/{}/note",
                         args.document_id, args.audit_event_id
                     ),
                     json!({ "body": args.body }),
@@ -673,7 +673,7 @@ async fn run_history(command: HistoryCommand) -> anyhow::Result<()> {
                     &args.client,
                     reqwest::Method::POST,
                     &format!(
-                        "/pages/{}/audit/{}/note",
+                        "/v1/pages/{}/audit/{}/note",
                         args.document_id, args.audit_event_id
                     ),
                     json!({ "body": "" }),
@@ -740,7 +740,7 @@ fn history_list_path(args: &HistoryListArgs) -> String {
         params.push(format!("limit={limit}"));
     }
     format!(
-        "/pages/{}/history?{}",
+        "/v1/pages/{}/history?{}",
         args.document_id,
         params.join("&")
     )

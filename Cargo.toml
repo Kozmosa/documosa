@@ -10,6 +10,7 @@ members = ["documosa-core", "."]
 documosa-core = { path = "documosa-core", features = ["sqlx"] }
 anyhow = "1"
 axum = { version = "0.8", features = ["json", "macros", "ws"] }
+base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 jsonwebtoken = "9"
 clap = { version = "4", features = ["derive", "env"] }

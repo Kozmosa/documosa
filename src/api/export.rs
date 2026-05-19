@@ -2,6 +2,7 @@ use axum::extract::{Path, State};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
+use serde_json::json;
 
 use crate::AppState;
 use crate::db;
@@ -19,5 +20,8 @@ async fn export_markdown(
     Path(page_id): Path<String>,
 ) -> Result<impl IntoResponse> {
     let markdown = db::export_markdown(&state.pool, &page_id).await?;
-    Ok(Json(serde_json::json!({ "markdown": markdown })))
+    Ok(Json(json!({
+        "object": "page",
+        "markdown": markdown
+    })))
 }
