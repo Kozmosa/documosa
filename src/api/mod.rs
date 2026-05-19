@@ -7,8 +7,10 @@ mod export;
 mod ws;
 
 use axum::Router;
+use axum::http::{HeaderName, HeaderValue};
 use serde::Serialize;
 use serde_json::{Value, json, Map};
+use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::AppState;
 use crate::mmdash_api;
@@ -36,7 +38,11 @@ pub fn router() -> Router<AppState> {
         .merge(suggestions::router())
         .merge(history::router())
         .merge(export::router())
-        .merge(ws::router());
+        .merge(ws::router())
+        .layer(SetResponseHeaderLayer::if_not_present(
+            HeaderName::from_static("notion-version"),
+            HeaderValue::from_static("2022-06-28"),
+        ));
     Router::new()
         .nest("/v1", v1)
         .merge(mmdash_api::router())
