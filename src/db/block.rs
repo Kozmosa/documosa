@@ -294,7 +294,7 @@ pub async fn delete_block(
     super::page::snapshot(pool, &page_id).await
 }
 
-pub(crate) async fn insert_block_tx(
+pub async fn insert_block_tx(
     tx: &mut Transaction<'_, Sqlite>,
     page_id: &str,
     parent_id: Option<&str>,

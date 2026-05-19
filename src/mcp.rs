@@ -10,6 +10,7 @@ use crate::db;
 use crate::diff;
 use crate::error::{AppError, Result};
 use crate::models::{HistoryCategory, HistoryListOptions, Identity, RoleMode};
+use crate::mmdash_blocks::{self, BlockType};
 
 pub fn router() -> Router<AppState> {
     Router::new().route("/mcp", post(handle))
@@ -65,23 +66,96 @@ async fn dispatch(state: &AppState, request: JsonRpcRequest) -> Result<Value> {
         })),
         "tools/list" => Ok(json!({
             "tools": [
-                tool("list_documents", "List documents", object_schema(&[], &[])),
-                tool("create_document", "Create a document", object_schema(&["title"], &[("title", string_schema()), ("content", string_schema())])),
-                tool("get_document", "Get a document snapshot", object_schema(&["document_id"], &[("document_id", string_schema())])),
-                tool("export_document", "Export active text", object_schema(&["document_id"], &[("document_id", string_schema())])),
-                tool("list_history_events", "List document history events", object_schema(&["document_id"], &[("document_id", string_schema()), ("category", enum_schema(&["document-comment", "all", "content", "comment", "suggestion", "system"])), ("from", string_schema()), ("to", string_schema()), ("limit", integer_schema())])),
-                tool("diff_history_events", "Diff two document history events", object_schema(&["document_id", "from", "to"], &[("document_id", string_schema()), ("from", string_schema()), ("to", string_schema()), ("context", integer_schema())])),
-                tool("set_audit_event_note", "Set a shared audit event note", object_schema(&["document_id", "audit_event_id", "body"], &[("document_id", string_schema()), ("audit_event_id", string_schema()), ("body", string_schema())])),
-                tool("clear_audit_event_note", "Clear a shared audit event note", object_schema(&["document_id", "audit_event_id"], &[("document_id", string_schema()), ("audit_event_id", string_schema())])),
-                tool("insert_lines", "Insert lines atomically", object_schema(&["document_id", "content"], &[("document_id", string_schema()), ("after_line_id", string_schema()), ("content", string_array_schema())])),
-                tool("replace_lines", "Replace lines atomically", object_schema(&["document_id", "line_ids", "content"], &[("document_id", string_schema()), ("line_ids", string_array_schema()), ("content", string_array_schema())])),
-                tool("delete_lines", "Delete lines atomically", object_schema(&["document_id", "line_ids"], &[("document_id", string_schema()), ("line_ids", string_array_schema())])),
-                tool("comment_on_range", "Comment on a line range", object_schema(&["document_id", "start_line_id", "end_line_id", "body"], &[("document_id", string_schema()), ("start_line_id", string_schema()), ("end_line_id", string_schema()), ("body", string_schema())])),
-                tool("reply_comment", "Reply to a comment", object_schema(&["document_id", "comment_id", "body"], &[("document_id", string_schema()), ("comment_id", string_schema()), ("body", string_schema())])),
-                tool("resolve_comment", "Resolve a comment", object_schema(&["document_id", "comment_id"], &[("document_id", string_schema()), ("comment_id", string_schema())])),
-                tool("suggest_change", "Create a structured suggestion", object_schema(&["document_id", "kind"], &[("document_id", string_schema()), ("kind", enum_schema(&["insert", "replace", "delete"])), ("anchor_line_id", string_schema()), ("start_line_id", string_schema()), ("end_line_id", string_schema()), ("content", string_array_schema())])),
-                tool("accept_suggestion", "Accept a suggestion", object_schema(&["document_id", "suggestion_id"], &[("document_id", string_schema()), ("suggestion_id", string_schema())])),
-                tool("reject_suggestion", "Reject a suggestion", object_schema(&["document_id", "suggestion_id"], &[("document_id", string_schema()), ("suggestion_id", string_schema())]))
+                tool("list_pages", "List all pages", object_schema(&[], &[])),
+                tool("page_create", "Create a new page", object_schema(&["title"], &[
+                    ("title", string_schema()),
+                    ("content", string_schema()),
+                    ("content_format", enum_schema(&["rich_text", "markdown"])),
+                ])),
+                tool("page_get", "Get a page snapshot", object_schema(&["page_id"], &[
+                    ("page_id", string_schema()),
+                ])),
+                tool("page_export", "Export a page as markdown", object_schema(&["page_id"], &[
+                    ("page_id", string_schema()),
+                ])),
+                tool("block_get", "Get a block", object_schema(&["block_id"], &[
+                    ("block_id", string_schema()),
+                ])),
+                tool("block_list_children", "List child blocks of a page or parent block", object_schema(&["page_id"], &[
+                    ("page_id", string_schema()),
+                    ("parent_id", string_schema()),
+                    ("cursor", integer_schema()),
+                    ("page_size", integer_schema()),
+                ])),
+                tool("block_append", "Append blocks to a page", object_schema(&["page_id"], &[
+                    ("page_id", string_schema()),
+                    ("blocks", string_schema()),
+                    ("content", string_schema()),
+                    ("after", string_schema()),
+                    ("content_format", enum_schema(&["rich_text", "markdown"])),
+                ])),
+                tool("block_update", "Update a block", object_schema(&["block_id"], &[
+                    ("block_id", string_schema()),
+                    ("block_type", string_schema()),
+                    ("content", string_schema()),
+                    ("properties_json", string_schema()),
+                    ("content_format", enum_schema(&["rich_text", "markdown"])),
+                ])),
+                tool("block_delete", "Delete a block", object_schema(&["block_id"], &[
+                    ("block_id", string_schema()),
+                ])),
+                tool("comment_create", "Create a comment on a block", object_schema(&["block_id", "body"], &[
+                    ("block_id", string_schema()),
+                    ("body", string_schema()),
+                    ("start_column", integer_schema()),
+                    ("end_column", integer_schema()),
+                ])),
+                tool("reply_comment", "Reply to a comment", object_schema(&["block_id", "comment_id", "body"], &[
+                    ("block_id", string_schema()),
+                    ("comment_id", string_schema()),
+                    ("body", string_schema()),
+                ])),
+                tool("resolve_comment", "Resolve a comment", object_schema(&["block_id", "comment_id"], &[
+                    ("block_id", string_schema()),
+                    ("comment_id", string_schema()),
+                ])),
+                tool("suggestion_create", "Create a suggestion on a page", object_schema(&["page_id", "kind"], &[
+                    ("page_id", string_schema()),
+                    ("kind", enum_schema(&["insert", "replace", "delete"])),
+                    ("target_block_id", string_schema()),
+                    ("parent_id", string_schema()),
+                    ("content", string_array_schema()),
+                ])),
+                tool("suggestion_accept", "Accept a suggestion", object_schema(&["page_id", "suggestion_id"], &[
+                    ("page_id", string_schema()),
+                    ("suggestion_id", string_schema()),
+                ])),
+                tool("suggestion_reject", "Reject a suggestion", object_schema(&["page_id", "suggestion_id"], &[
+                    ("page_id", string_schema()),
+                    ("suggestion_id", string_schema()),
+                ])),
+                tool("history_list", "List history events for a page", object_schema(&["page_id"], &[
+                    ("page_id", string_schema()),
+                    ("category", enum_schema(&["document-comment", "all", "content", "comment", "suggestion", "system"])),
+                    ("from", string_schema()),
+                    ("to", string_schema()),
+                    ("limit", integer_schema()),
+                ])),
+                tool("history_diff", "Diff two history events", object_schema(&["page_id", "from", "to"], &[
+                    ("page_id", string_schema()),
+                    ("from", string_schema()),
+                    ("to", string_schema()),
+                    ("context", integer_schema()),
+                ])),
+                tool("set_audit_note", "Set a shared audit event note", object_schema(&["page_id", "audit_event_id", "body"], &[
+                    ("page_id", string_schema()),
+                    ("audit_event_id", string_schema()),
+                    ("body", string_schema()),
+                ])),
+                tool("clear_audit_note", "Clear a shared audit event note", object_schema(&["page_id", "audit_event_id"], &[
+                    ("page_id", string_schema()),
+                    ("audit_event_id", string_schema()),
+                ])),
             ]
         })),
         "tools/call" => {
@@ -115,34 +189,225 @@ fn tool(name: &str, description: &str, input_schema: Value) -> Value {
 async fn call_tool(state: &AppState, name: &str, args: Value) -> Result<Value> {
     let actor = actor_from_args(&args)?;
     let (value, text) = match name {
-        "list_documents" => (json!(db::list_pages(&state.pool).await?), None),
-        "create_document" => {
+        "list_pages" => (json!(db::list_pages(&state.pool).await?), None),
+        "page_create" => {
             let title = string_arg(&args, "title")?;
             let content = args
                 .get("content")
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string();
-            let snap = db::create_page(&state.pool, &actor, title, content).await?;
+            let content_format = args
+                .get("content_format")
+                .and_then(Value::as_str)
+                .unwrap_or("rich_text");
+
+            let blocks_json = if content_format == "markdown" {
+                let inputs = markdown_to_block_inputs(&content)?;
+                serde_json::to_string(&inputs)?
+            } else {
+                content
+            };
+
+            let snap = db::create_page(&state.pool, &actor, title, blocks_json).await?;
+            state.hub.page_created(&snap.page.id);
             (json!(snap), None)
         }
-        "get_document" => (
-            json!(db::snapshot(&state.pool, &string_arg(&args, "document_id")?).await?),
+        "page_get" => (
+            json!(db::snapshot(&state.pool, &string_arg(&args, "page_id")?).await?),
             None,
         ),
-        "export_document" => (
-            json!({
-                "content": db::export_markdown(&state.pool, &string_arg(&args, "document_id")?).await?
-            }),
+        "page_export" => {
+            let md =
+                db::export_markdown(&state.pool, &string_arg(&args, "page_id")?).await?;
+            (json!({ "markdown": md }), Some(md))
+        }
+        "block_get" => (
+            json!(db::get_block(&state.pool, &string_arg(&args, "block_id")?).await?),
             None,
         ),
-        "list_history_events" => {
-            let document_id = string_arg(&args, "document_id")?;
+        "block_list_children" => {
+            let page_id = string_arg(&args, "page_id")?;
+            let parent_id = args.get("parent_id").and_then(Value::as_str);
+            let cursor = args.get("cursor").and_then(Value::as_f64);
+            let page_size = optional_i64_arg(&args, "page_size")?
+                .unwrap_or(50)
+                .max(1)
+                .min(100);
+            let (blocks, next_cursor, has_more) = db::list_children(
+                &state.pool,
+                parent_id,
+                &page_id,
+                cursor,
+                page_size,
+            )
+            .await?;
+            (
+                json!({
+                    "results": blocks,
+                    "next_cursor": next_cursor,
+                    "has_more": has_more
+                }),
+                None,
+            )
+        }
+        "block_append" => {
+            let page_id = string_arg(&args, "page_id")?;
+            let after = args.get("after").and_then(Value::as_str);
+            let content_format = args
+                .get("content_format")
+                .and_then(Value::as_str)
+                .unwrap_or("rich_text");
+
+            let block_inputs = if content_format == "markdown" {
+                let content = string_arg(&args, "content")?;
+                markdown_to_block_inputs(&content)?
+            } else {
+                let blocks_str = string_arg(&args, "blocks")?;
+                serde_json::from_str(&blocks_str)?
+            };
+
+            let snap = db::append_blocks(
+                &state.pool,
+                &actor,
+                &page_id,
+                block_inputs,
+                after,
+            )
+            .await?;
+            state.hub.block_inserted(&page_id, &[], after);
+            (json!(snap), None)
+        }
+        "block_update" => {
+            let block_id = string_arg(&args, "block_id")?;
+            let block_type = args.get("block_type").and_then(Value::as_str);
+            let properties_json = args.get("properties_json").and_then(Value::as_str);
+            let content_format = args
+                .get("content_format")
+                .and_then(Value::as_str)
+                .unwrap_or("rich_text");
+
+            let content_json = match (args.get("content").and_then(Value::as_str), content_format) {
+                (Some(content), "markdown") => {
+                    Some(serde_json::to_string(&[serde_json::json!({
+                        "type": "text",
+                        "text": { "content": content },
+                        "plain_text": content,
+                    })])?)
+                }
+                (Some(content), _) => Some(content.to_string()),
+                (None, _) => None,
+            };
+
+            let snap = db::update_block(
+                &state.pool,
+                &actor,
+                &block_id,
+                block_type,
+                content_json.as_deref(),
+                properties_json,
+            )
+            .await?;
+            state.hub.block_updated(&snap.page.id, &block_id);
+            (json!(snap), None)
+        }
+        "block_delete" => {
+            let block_id = string_arg(&args, "block_id")?;
+            let snap =
+                db::delete_block(&state.pool, &actor, &block_id).await?;
+            state.hub.block_deleted(&snap.page.id, &[block_id]);
+            (json!(snap), None)
+        }
+        "comment_create" => {
+            let block_id = string_arg(&args, "block_id")?;
+            let page_id = db::get_block(&state.pool, &block_id).await?.page_id;
+            let snap = db::create_comment(
+                &state.pool,
+                &actor,
+                &page_id,
+                db::CommentDraft {
+                    target_block_id: block_id,
+                    start_column: optional_i64_arg(&args, "start_column")?,
+                    end_column: optional_i64_arg(&args, "end_column")?,
+                    body: string_arg(&args, "body")?,
+                },
+            )
+            .await?;
+            state
+                .hub
+                .comment_created(&page_id, snap.comments.last().unwrap().id.as_str());
+            (json!(snap), None)
+        }
+        "reply_comment" => {
+            let block_id = string_arg(&args, "block_id")?;
+            let page_id = db::get_block(&state.pool, &block_id).await?.page_id;
+            let snap = db::reply_comment(
+                &state.pool,
+                &actor,
+                &page_id,
+                &string_arg(&args, "comment_id")?,
+                string_arg(&args, "body")?,
+            )
+            .await?;
+            state.hub.content_changed(&page_id);
+            (json!(snap), None)
+        }
+        "resolve_comment" => {
+            let block_id = string_arg(&args, "block_id")?;
+            let page_id = db::get_block(&state.pool, &block_id).await?.page_id;
+            let comment_id = string_arg(&args, "comment_id")?;
+            let snap = db::resolve_comment(&state.pool, &actor, &page_id, &comment_id).await?;
+            state.hub.comment_resolved(&page_id, &comment_id);
+            (json!(snap), None)
+        }
+        "suggestion_create" => {
+            let page_id = string_arg(&args, "page_id")?;
+            let target_block_id = args
+                .get("target_block_id")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            let content = args
+                .get("content")
+                .map(|_| string_vec_arg(&args, "content"))
+                .transpose()?
+                .unwrap_or_default();
+            let snap = db::create_suggestion(
+                &state.pool,
+                &actor,
+                &page_id,
+                string_arg(&args, "kind")?,
+                target_block_id,
+                content,
+            )
+            .await?;
+            state
+                .hub
+                .suggestion_created(&page_id, snap.suggestions.last().unwrap().id.as_str());
+            (json!(snap), None)
+        }
+        "suggestion_accept" | "suggestion_reject" => {
+            let page_id = string_arg(&args, "page_id")?;
+            let accept = name == "suggestion_accept";
+            let snap = db::decide_suggestion(
+                &state.pool,
+                &actor,
+                &page_id,
+                &string_arg(&args, "suggestion_id")?,
+                accept,
+            )
+            .await?;
+            state
+                .hub
+                .suggestion_decided(&page_id, &string_arg(&args, "suggestion_id")?, accept);
+            (json!(snap), None)
+        }
+        "history_list" => {
+            let page_id = string_arg(&args, "page_id")?;
             (
                 json!(
                     db::list_history_events(
                         &state.pool,
-                        &document_id,
+                        &page_id,
                         history_options_from_args(&args)?
                     )
                     .await?
@@ -150,11 +415,11 @@ async fn call_tool(state: &AppState, name: &str, args: Value) -> Result<Value> {
                 None,
             )
         }
-        "diff_history_events" => {
-            let document_id = string_arg(&args, "document_id")?;
+        "history_diff" => {
+            let page_id = string_arg(&args, "page_id")?;
             let history_diff = db::history_diff(
                 &state.pool,
-                &document_id,
+                &page_id,
                 &string_arg(&args, "from")?,
                 &string_arg(&args, "to")?,
             )
@@ -167,114 +432,30 @@ async fn call_tool(state: &AppState, name: &str, args: Value) -> Result<Value> {
             }
             (value, Some(unified_diff))
         }
-        "set_audit_event_note" => {
-            let document_id = string_arg(&args, "document_id")?;
+        "set_audit_note" => {
+            let page_id = string_arg(&args, "page_id")?;
             let snap = db::put_audit_event_note(
                 &state.pool,
                 &actor,
-                &document_id,
+                &page_id,
                 &string_arg(&args, "audit_event_id")?,
                 string_arg(&args, "body")?,
             )
             .await?;
-            state.hub.content_changed(&document_id);
+            state.hub.content_changed(&page_id);
             (json!(snap), None)
         }
-        "clear_audit_event_note" => {
-            let document_id = string_arg(&args, "document_id")?;
+        "clear_audit_note" => {
+            let page_id = string_arg(&args, "page_id")?;
             let snap = db::put_audit_event_note(
                 &state.pool,
                 &actor,
-                &document_id,
+                &page_id,
                 &string_arg(&args, "audit_event_id")?,
                 String::new(),
             )
             .await?;
-            state.hub.content_changed(&document_id);
-            (json!(snap), None)
-        }
-        "insert_lines" => {
-            todo!("insert_lines will be replaced in Task 6")
-        }
-        "replace_lines" => {
-            todo!("replace_lines will be replaced in Task 6")
-        }
-        "delete_lines" => {
-            todo!("delete_lines will be replaced in Task 6")
-        }
-        "comment_on_range" => {
-            let document_id = string_arg(&args, "document_id")?;
-            let snap = db::create_comment(
-                &state.pool,
-                &actor,
-                &document_id,
-                db::CommentDraft {
-                    target_block_id: string_arg(&args, "start_line_id")?,
-                    start_column: None,
-                    end_column: None,
-                    body: string_arg(&args, "body")?,
-                },
-            )
-            .await?;
-            state.hub.comment_created(&document_id, snap.comments.last().unwrap().id.as_str());
-            (json!(snap), None)
-        }
-        "reply_comment" => {
-            let document_id = string_arg(&args, "document_id")?;
-            let snap = db::reply_comment(
-                &state.pool,
-                &actor,
-                &document_id,
-                &string_arg(&args, "comment_id")?,
-                string_arg(&args, "body")?,
-            )
-            .await?;
-            state.hub.content_changed(&document_id);
-            (json!(snap), None)
-        }
-        "resolve_comment" => {
-            let document_id = string_arg(&args, "document_id")?;
-            let snap = db::resolve_comment(
-                &state.pool,
-                &actor,
-                &document_id,
-                &string_arg(&args, "comment_id")?,
-            )
-            .await?;
-            state.hub.comment_resolved(&document_id, &string_arg(&args, "comment_id")?);
-            (json!(snap), None)
-        }
-        "suggest_change" => {
-            let document_id = string_arg(&args, "document_id")?;
-            let snap = db::create_suggestion(
-                &state.pool,
-                &actor,
-                &document_id,
-                string_arg(&args, "kind")?,
-                args.get("anchor_line_id")
-                    .and_then(Value::as_str)
-                    .map(str::to_string),
-                args.get("content")
-                    .map(|_| string_vec_arg(&args, "content"))
-                    .transpose()?
-                    .unwrap_or_default(),
-            )
-            .await?;
-            state.hub.suggestion_created(&document_id, snap.suggestions.last().unwrap().id.as_str());
-            (json!(snap), None)
-        }
-        "accept_suggestion" | "reject_suggestion" => {
-            let document_id = string_arg(&args, "document_id")?;
-            let accept = name == "accept_suggestion";
-            let snap = db::decide_suggestion(
-                &state.pool,
-                &actor,
-                &document_id,
-                &string_arg(&args, "suggestion_id")?,
-                accept,
-            )
-            .await?;
-            state.hub.suggestion_decided(&document_id, &string_arg(&args, "suggestion_id")?, accept);
+            state.hub.content_changed(&page_id);
             (json!(snap), None)
         }
         _ => return Err(AppError::BadRequest(format!("unknown tool {name}"))),
@@ -431,4 +612,50 @@ fn normalize_history_timestamp(name: &str, value: &str) -> Result<String> {
     DateTime::parse_from_rfc3339(value)
         .map(|parsed| parsed.with_timezone(&Utc).to_rfc3339())
         .map_err(|_| AppError::BadRequest(format!("{name} must be an RFC3339 timestamp")))
+}
+
+fn markdown_to_block_inputs(markdown: &str) -> Result<Vec<db::BlockInput>> {
+    let mmdash_blocks = mmdash_blocks::markdown_to_blocks(markdown);
+    mmdash_blocks
+        .into_iter()
+        .map(|b| {
+            let block_type = match b.block_type {
+                BlockType::Heading1 => "heading_1",
+                BlockType::Heading2 => "heading_2",
+                BlockType::Heading3 => "heading_3",
+                BlockType::Code => "code",
+                BlockType::Equation => "equation",
+                BlockType::BulletedListItem => "bulleted_list_item",
+                BlockType::NumberedListItem => "numbered_list_item",
+                BlockType::Quote => "quote",
+                BlockType::Divider => "divider",
+                BlockType::Paragraph => "paragraph",
+            }
+            .to_string();
+
+            let content = b.content.unwrap_or_default();
+            let content_json = if matches!(b.block_type, BlockType::Divider) {
+                "[]".to_string()
+            } else {
+                serde_json::to_string(&[serde_json::json!({
+                    "type": "text",
+                    "text": { "content": content },
+                    "plain_text": content,
+                })])?
+            };
+
+            let properties_json = match b.block_type {
+                BlockType::Code => {
+                    Some(serde_json::json!({ "language": b.language.unwrap_or_default() }).to_string())
+                }
+                _ => None,
+            };
+
+            Ok(db::BlockInput {
+                block_type,
+                content_json,
+                properties_json,
+            })
+        })
+        .collect()
 }

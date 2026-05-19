@@ -67,6 +67,19 @@ pub struct ClientArgs {
     pub nickname: String,
     #[arg(long, value_enum, default_value_t = RoleArg::Reviewer)]
     pub role_mode: RoleArg,
+    #[arg(long)]
+    pub token: Option<String>,
+    #[arg(long)]
+    pub jwt: Option<String>,
+}
+
+impl ClientArgs {
+    fn bearer_token(&self) -> Option<String> {
+        self.jwt
+            .clone()
+            .or_else(|| self.token.clone())
+            .filter(|t| !t.is_empty())
+    }
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -99,6 +112,7 @@ impl HistoryCategoryArg {
 }
 
 impl RoleArg {
+    #[allow(dead_code)]
     fn as_str(self) -> &'static str {
         match self {
             RoleArg::Reviewer => "reviewer",
@@ -204,11 +218,11 @@ pub enum CommentCommand {
 pub struct CreateCommentArgs {
     #[command(flatten)]
     pub client: ClientArgs,
-    pub document_id: String,
+    pub block_id: String,
     #[arg(long)]
-    pub start_line_id: String,
+    pub start_column: Option<i64>,
     #[arg(long)]
-    pub end_line_id: String,
+    pub end_column: Option<i64>,
     #[arg(long)]
     pub body: String,
 }
@@ -217,7 +231,7 @@ pub struct CreateCommentArgs {
 pub struct ReplyCommentArgs {
     #[command(flatten)]
     pub client: ClientArgs,
-    pub document_id: String,
+    pub block_id: String,
     pub comment_id: String,
     #[arg(long)]
     pub body: String,
@@ -227,7 +241,7 @@ pub struct ReplyCommentArgs {
 pub struct ResolveCommentArgs {
     #[command(flatten)]
     pub client: ClientArgs,
-    pub document_id: String,
+    pub block_id: String,
     pub comment_id: String,
 }
 
@@ -308,7 +322,7 @@ pub struct CreateSuggestionArgs {
     #[arg(long)]
     pub kind: String,
     #[arg(long)]
-    pub anchor_line_id: Option<String>,
+    pub target_block_id: Option<String>,
     #[arg(long)]
     pub start_line_id: Option<String>,
     #[arg(long)]
@@ -349,15 +363,17 @@ async fn run_document(command: DocumentCommand) -> anyhow::Result<()> {
     match command {
         DocumentCommand::List(args) => {
             if let Some(notion) = notion_backend(&args.client) {
-                let parent_page_id = require_parent_page_id(args.notion_parent_page_id.as_deref())?;
+                let parent_page_id =
+                    require_parent_page_id(args.notion_parent_page_id.as_deref())?;
                 print_json(notion.list_documents(parent_page_id).await?)
             } else {
-                print_json(request(&args.client, reqwest::Method::GET, "/api/documents", ()).await?)
+                print_json(request(&args.client, reqwest::Method::GET, "/pages", ()).await?)
             }
         }
         DocumentCommand::Create(args) => {
             if let Some(notion) = notion_backend(&args.client) {
-                let parent_page_id = require_parent_page_id(args.notion_parent_page_id.as_deref())?;
+                let parent_page_id =
+                    require_parent_page_id(args.notion_parent_page_id.as_deref())?;
                 print_json(
                     notion
                         .create_document(parent_page_id, &args.title, &args.content)
@@ -368,8 +384,8 @@ async fn run_document(command: DocumentCommand) -> anyhow::Result<()> {
                     request(
                         &args.client,
                         reqwest::Method::POST,
-                        "/api/documents",
-                        json!({ "title": args.title, "content": args.content }),
+                        "/pages",
+                        json!({ "title": args.title, "content_json": args.content }),
                     )
                     .await?,
                 )
@@ -378,7 +394,8 @@ async fn run_document(command: DocumentCommand) -> anyhow::Result<()> {
         DocumentCommand::Import(args) => {
             let content = tokio::fs::read_to_string(args.file).await?;
             if let Some(notion) = notion_backend(&args.client) {
-                let parent_page_id = require_parent_page_id(args.notion_parent_page_id.as_deref())?;
+                let parent_page_id =
+                    require_parent_page_id(args.notion_parent_page_id.as_deref())?;
                 print_json(
                     notion
                         .create_document(parent_page_id, &args.title, &content)
@@ -389,8 +406,8 @@ async fn run_document(command: DocumentCommand) -> anyhow::Result<()> {
                     request(
                         &args.client,
                         reqwest::Method::POST,
-                        "/api/documents",
-                        json!({ "title": args.title, "content": content }),
+                        "/pages",
+                        json!({ "title": args.title, "content_json": content }),
                     )
                     .await?,
                 )
@@ -404,7 +421,7 @@ async fn run_document(command: DocumentCommand) -> anyhow::Result<()> {
                     request(
                         &args.client,
                         reqwest::Method::GET,
-                        &format!("/api/documents/{}", args.document_id),
+                        &format!("/pages/{}/snapshot", args.document_id),
                         (),
                     )
                     .await?,
@@ -417,14 +434,16 @@ async fn run_document(command: DocumentCommand) -> anyhow::Result<()> {
                 println!("{text}");
                 Ok(())
             } else {
-                let text = request_text(
+                let value: serde_json::Value = request(
                     &args.client,
                     reqwest::Method::GET,
-                    &format!("/api/documents/{}/export", args.document_id),
+                    &format!("/pages/{}/export/md", args.document_id),
                     (),
                 )
                 .await?;
-                println!("{text}");
+                if let Some(md) = value.get("markdown").and_then(|v| v.as_str()) {
+                    println!("{md}");
+                }
                 Ok(())
             }
         }
@@ -441,12 +460,28 @@ async fn run_line(command: LineCommand) -> anyhow::Result<()> {
                         .await?,
                 )
             } else {
+                let children: Vec<serde_json::Value> = args
+                    .lines
+                    .iter()
+                    .map(|line| {
+                        let content_json = serde_json::json!([{
+                            "type": "text",
+                            "text": { "content": line },
+                            "plain_text": line,
+                        }])
+                        .to_string();
+                        json!({
+                            "block_type": "paragraph",
+                            "content_json": content_json,
+                        })
+                    })
+                    .collect();
                 print_json(
                     request(
                         &args.client,
-                        reqwest::Method::POST,
-                        &format!("/api/documents/{}/lines/insert", args.document_id),
-                        json!({ "after_line_id": args.after_line_id, "content": args.lines }),
+                        reqwest::Method::PATCH,
+                        &format!("/pages/{}/children", args.document_id),
+                        json!({ "children": children, "after": args.after_line_id }),
                     )
                     .await?,
                 )
@@ -460,15 +495,27 @@ async fn run_line(command: LineCommand) -> anyhow::Result<()> {
                         .await?,
                 )
             } else {
-                print_json(
-                    request(
-                        &args.client,
-                        reqwest::Method::POST,
-                        &format!("/api/documents/{}/lines/replace", args.document_id),
-                        json!({ "line_ids": args.line_ids, "content": args.lines }),
+                let text = args.lines.join("\n");
+                let content_json = serde_json::json!([{
+                    "type": "text",
+                    "text": { "content": text },
+                    "plain_text": text,
+                }])
+                .to_string();
+                // Use first line_id; existing behavior for multiple is best-effort
+                if let Some(block_id) = args.line_ids.first() {
+                    print_json(
+                        request(
+                            &args.client,
+                            reqwest::Method::PATCH,
+                            &format!("/blocks/{}", block_id),
+                            json!({ "content_json": content_json }),
+                        )
+                        .await?,
                     )
-                    .await?,
-                )
+                } else {
+                    anyhow::bail!("at least one line-id is required");
+                }
             }
         }
         LineCommand::Delete(args) => {
@@ -479,15 +526,18 @@ async fn run_line(command: LineCommand) -> anyhow::Result<()> {
                         .await?,
                 )
             } else {
-                print_json(
-                    request(
+                if let Some(block_id) = args.line_ids.first() {
+                    let snap: serde_json::Value = request(
                         &args.client,
-                        reqwest::Method::POST,
-                        &format!("/api/documents/{}/lines/delete", args.document_id),
-                        json!({ "line_ids": args.line_ids }),
+                        reqwest::Method::DELETE,
+                        &format!("/blocks/{}", block_id),
+                        json!({}),
                     )
-                    .await?,
-                )
+                    .await?;
+                    print_json(snap)
+                } else {
+                    anyhow::bail!("at least one line-id is required");
+                }
             }
         }
     }
@@ -498,9 +548,37 @@ async fn run_comment(command: CommentCommand) -> anyhow::Result<()> {
         unsupported_notion_backend()?;
     }
     match command {
-        CommentCommand::Create(args) => print_json(request(&args.client, reqwest::Method::POST, &format!("/api/documents/{}/comments", args.document_id), json!({ "start_line_id": args.start_line_id, "end_line_id": args.end_line_id, "body": args.body })).await?),
-        CommentCommand::Reply(args) => print_json(request(&args.client, reqwest::Method::POST, &format!("/api/documents/{}/comments/{}/reply", args.document_id, args.comment_id), json!({ "body": args.body })).await?),
-        CommentCommand::Resolve(args) => print_json(request(&args.client, reqwest::Method::POST, &format!("/api/documents/{}/comments/{}/resolve", args.document_id, args.comment_id), json!({})).await?),
+        CommentCommand::Create(args) => print_json(
+            request(
+                &args.client,
+                reqwest::Method::POST,
+                &format!("/blocks/{}/comments", args.block_id),
+                json!({
+                    "body": args.body,
+                    "start_column": args.start_column,
+                    "end_column": args.end_column,
+                }),
+            )
+            .await?,
+        ),
+        CommentCommand::Reply(args) => print_json(
+            request(
+                &args.client,
+                reqwest::Method::POST,
+                &format!("/blocks/{}/comments/{}/replies", args.block_id, args.comment_id),
+                json!({ "body": args.body }),
+            )
+            .await?,
+        ),
+        CommentCommand::Resolve(args) => print_json(
+            request(
+                &args.client,
+                reqwest::Method::POST,
+                &format!("/blocks/{}/comments/{}/resolve", args.block_id, args.comment_id),
+                json!({}),
+            )
+            .await?,
+        ),
     }
 }
 
@@ -509,9 +587,37 @@ async fn run_suggestion(command: SuggestionCommand) -> anyhow::Result<()> {
         unsupported_notion_backend()?;
     }
     match command {
-        SuggestionCommand::Create(args) => print_json(request(&args.client, reqwest::Method::POST, &format!("/api/documents/{}/suggestions", args.document_id), json!({ "kind": args.kind, "anchor_line_id": args.anchor_line_id, "start_line_id": args.start_line_id, "end_line_id": args.end_line_id, "content": args.content })).await?),
-        SuggestionCommand::Accept(args) => print_json(request(&args.client, reqwest::Method::POST, &format!("/api/documents/{}/suggestions/{}/accept", args.document_id, args.suggestion_id), json!({})).await?),
-        SuggestionCommand::Reject(args) => print_json(request(&args.client, reqwest::Method::POST, &format!("/api/documents/{}/suggestions/{}/reject", args.document_id, args.suggestion_id), json!({})).await?),
+        SuggestionCommand::Create(args) => print_json(
+            request(
+                &args.client,
+                reqwest::Method::POST,
+                &format!("/pages/{}/suggestions", args.document_id),
+                json!({
+                    "kind": args.kind,
+                    "target_block_id": args.target_block_id,
+                    "content": args.content,
+                }),
+            )
+            .await?,
+        ),
+        SuggestionCommand::Accept(args) => print_json(
+            request(
+                &args.client,
+                reqwest::Method::POST,
+                &format!("/pages/{}/suggestions/{}/accept", args.document_id, args.suggestion_id),
+                json!({}),
+            )
+            .await?,
+        ),
+        SuggestionCommand::Reject(args) => print_json(
+            request(
+                &args.client,
+                reqwest::Method::POST,
+                &format!("/pages/{}/suggestions/{}/reject", args.document_id, args.suggestion_id),
+                json!({}),
+            )
+            .await?,
+        ),
     }
 }
 
@@ -534,7 +640,7 @@ async fn run_history(command: HistoryCommand) -> anyhow::Result<()> {
                 &args.client,
                 reqwest::Method::GET,
                 &format!(
-                    "/api/documents/{}/history-diff?from={}&to={}",
+                    "/pages/{}/history-diff?from={}&to={}",
                     args.document_id,
                     query_component(&args.from),
                     query_component(&args.to)
@@ -553,9 +659,9 @@ async fn run_history(command: HistoryCommand) -> anyhow::Result<()> {
             HistoryNoteCommand::Set(args) => print_json(
                 request(
                     &args.client,
-                    reqwest::Method::PUT,
+                    reqwest::Method::POST,
                     &format!(
-                        "/api/documents/{}/audit-events/{}/note",
+                        "/pages/{}/audit/{}/note",
                         args.document_id, args.audit_event_id
                     ),
                     json!({ "body": args.body }),
@@ -565,9 +671,9 @@ async fn run_history(command: HistoryCommand) -> anyhow::Result<()> {
             HistoryNoteCommand::Clear(args) => print_json(
                 request(
                     &args.client,
-                    reqwest::Method::PUT,
+                    reqwest::Method::POST,
                     &format!(
-                        "/api/documents/{}/audit-events/{}/note",
+                        "/pages/{}/audit/{}/note",
                         args.document_id, args.audit_event_id
                     ),
                     json!({ "body": "" }),
@@ -634,7 +740,7 @@ fn history_list_path(args: &HistoryListArgs) -> String {
         params.push(format!("limit={limit}"));
     }
     format!(
-        "/api/documents/{}/history?{}",
+        "/pages/{}/history?{}",
         args.document_id,
         params.join("&")
     )
@@ -658,35 +764,18 @@ async fn request<T: Serialize>(
     Ok(serde_json::from_str(&text)?)
 }
 
-async fn request_text<T: Serialize>(
-    client_args: &ClientArgs,
-    method: reqwest::Method,
-    path: &str,
-    body: T,
-) -> anyhow::Result<String> {
-    let response = build_request(client_args, method, path)
-        .json(&body)
-        .send()
-        .await?;
-    let status = response.status();
-    let text = response.text().await?;
-    if !status.is_success() {
-        anyhow::bail!("{status}: {text}");
-    }
-    Ok(text)
-}
-
 fn build_request(
     client_args: &ClientArgs,
     method: reqwest::Method,
     path: &str,
 ) -> reqwest::RequestBuilder {
     let url = format!("{}{}", client_args.server.trim_end_matches('/'), path);
-    Client::new()
-        .request(method, url)
-        .header("x-documosa-client-id", &client_args.client_id)
-        .header("x-documosa-nickname", &client_args.nickname)
-        .header("x-documosa-role-mode", client_args.role_mode.as_str())
+    let builder = Client::new().request(method, url);
+    if let Some(token) = client_args.bearer_token() {
+        builder.bearer_auth(token)
+    } else {
+        builder
+    }
 }
 
 fn query_component(value: &str) -> String {
