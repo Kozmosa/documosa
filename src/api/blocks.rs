@@ -63,7 +63,11 @@ async fn list_children(
         page_size,
     )
     .await?;
-    let encoded_cursor = next_cursor.map(|order| BASE64.encode(order.to_string()));
+    let encoded_cursor = if has_more {
+        next_cursor.map(|order| BASE64.encode(order.to_string()))
+    } else {
+        None
+    };
     Ok(Json(ListChildrenResponse {
         object: "list",
         results: blocks,
