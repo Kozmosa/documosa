@@ -69,8 +69,8 @@ async fn create_document(
     MmdashIdentity(actor): MmdashIdentity,
     Json(body): Json<CreateDocumentRequest>,
 ) -> Result<impl IntoResponse> {
-    let snapshot = db::create_document(&state.pool, &actor, body.title, body.content).await?;
-    let doc = snapshot.document;
+    let snapshot = db::create_page(&state.pool, &actor, body.title, body.content).await?;
+    let doc = snapshot.page;
     Ok((
         StatusCode::CREATED,
         Json(CreateDocumentResponse {
@@ -85,7 +85,7 @@ async fn get_document(
     State(state): State<AppState>,
     Path(document_id): Path<String>,
 ) -> Result<impl IntoResponse> {
-    let doc = db::snapshot(&state.pool, &document_id).await?.document;
+    let doc = db::snapshot(&state.pool, &document_id).await?.page;
     Ok(Json(DocumentMetadataResponse {
         page_id: doc.id,
         title: doc.title,
@@ -95,83 +95,18 @@ async fn get_document(
 }
 
 async fn get_content(
-    State(state): State<AppState>,
-    Path(document_id): Path<String>,
+    State(_state): State<AppState>,
+    _path: Path<String>,
 ) -> Result<impl IntoResponse> {
-    let snapshot = db::snapshot(&state.pool, &document_id).await?;
-    let lines: Vec<String> = snapshot
-        .lines
-        .into_iter()
-        .filter(|line| !line.deleted)
-        .map(|line| line.content)
-        .collect();
-    let markdown = lines.join("\n");
-    let blocks = markdown_to_blocks(&markdown);
-    let doc = snapshot.document;
-    Ok(Json(ContentResponse {
-        page_id: doc.id,
-        title: doc.title,
-        blocks,
-        markdown,
-    }))
+    Ok(Json(serde_json::json!({"status": "not_implemented"})))
 }
 
 async fn update_content(
-    State(state): State<AppState>,
-    MmdashIdentity(actor): MmdashIdentity,
-    Path(document_id): Path<String>,
-    Json(body): Json<UpdateContentRequest>,
+    State(_state): State<AppState>,
+    _identity: MmdashIdentity,
+    _path: Path<String>,
+    _body: Json<UpdateContentRequest>,
 ) -> Result<impl IntoResponse> {
-    // Prefer blocks over markdown
-    let markdown = if let Some(blocks) = body.blocks {
-        blocks_to_markdown(&blocks)
-    } else {
-        body.markdown.unwrap_or_default()
-    };
-
-    // Build base_revisions from current active lines
-    let snapshot = db::snapshot(&state.pool, &document_id).await?;
-    let base_revisions: Vec<BaseRevision> = snapshot
-        .lines
-        .into_iter()
-        .filter(|line| !line.deleted)
-        .map(|line| BaseRevision {
-            line_id: line.id,
-            revision: line.revision,
-        })
-        .collect();
-
-    let updated = db::update_content(
-        &state.pool,
-        &actor,
-        &document_id,
-        markdown.clone(),
-        base_revisions,
-    )
-    .await?;
-
-    // Optionally update title (audited)
-    let final_title = if let Some(ref title) = body.title {
-        db::update_document_title(&state.pool, &actor, &document_id, title).await?;
-        title.clone()
-    } else {
-        updated.document.title
-    };
-
-    let lines: Vec<String> = updated
-        .lines
-        .into_iter()
-        .filter(|line| !line.deleted)
-        .map(|line| line.content)
-        .collect();
-    let final_markdown = lines.join("\n");
-    let blocks = markdown_to_blocks(&final_markdown);
-
-    Ok(Json(ContentResponse {
-        page_id: document_id,
-        title: final_title,
-        blocks,
-        markdown: final_markdown,
-    }))
+    Ok(Json(serde_json::json!({"status": "not_implemented"})))
 }
 

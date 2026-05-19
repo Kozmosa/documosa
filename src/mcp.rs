@@ -115,7 +115,7 @@ fn tool(name: &str, description: &str, input_schema: Value) -> Value {
 async fn call_tool(state: &AppState, name: &str, args: Value) -> Result<Value> {
     let actor = actor_from_args(&args)?;
     let (value, text) = match name {
-        "list_documents" => (json!(db::list_documents(&state.pool).await?), None),
+        "list_documents" => (json!(db::list_pages(&state.pool).await?), None),
         "create_document" => {
             let title = string_arg(&args, "title")?;
             let content = args
@@ -123,7 +123,7 @@ async fn call_tool(state: &AppState, name: &str, args: Value) -> Result<Value> {
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string();
-            let snap = db::create_document(&state.pool, &actor, title, content).await?;
+            let snap = db::create_page(&state.pool, &actor, title, content).await?;
             (json!(snap), None)
         }
         "get_document" => (
@@ -132,7 +132,7 @@ async fn call_tool(state: &AppState, name: &str, args: Value) -> Result<Value> {
         ),
         "export_document" => (
             json!({
-                "content": db::export_document(&state.pool, &string_arg(&args, "document_id")?).await?
+                "content": db::export_markdown(&state.pool, &string_arg(&args, "document_id")?).await?
             }),
             None,
         ),
@@ -194,40 +194,13 @@ async fn call_tool(state: &AppState, name: &str, args: Value) -> Result<Value> {
             (json!(snap), None)
         }
         "insert_lines" => {
-            let document_id = string_arg(&args, "document_id")?;
-            let content = string_vec_arg(&args, "content")?;
-            let after = args
-                .get("after_line_id")
-                .and_then(Value::as_str)
-                .map(str::to_string);
-            let snap = db::insert_lines(&state.pool, &actor, &document_id, after, content).await?;
-            state.hub.content_changed(&document_id);
-            (json!(snap), None)
+            todo!("insert_lines will be replaced in Task 6")
         }
         "replace_lines" => {
-            let document_id = string_arg(&args, "document_id")?;
-            let line_ids = string_vec_arg(&args, "line_ids")?;
-            let snap = db::replace_lines(
-                &state.pool,
-                &actor,
-                &document_id,
-                line_ids.clone(),
-                string_vec_arg(&args, "content")?,
-            ).await?;
-            state.hub.lines_replaced(&document_id, &line_ids);
-            (json!(snap), None)
+            todo!("replace_lines will be replaced in Task 6")
         }
         "delete_lines" => {
-            let document_id = string_arg(&args, "document_id")?;
-            let line_ids = string_vec_arg(&args, "line_ids")?;
-            let snap = db::delete_lines(
-                &state.pool,
-                &actor,
-                &document_id,
-                line_ids.clone(),
-            ).await?;
-            state.hub.lines_deleted(&document_id, &line_ids);
-            (json!(snap), None)
+            todo!("delete_lines will be replaced in Task 6")
         }
         "comment_on_range" => {
             let document_id = string_arg(&args, "document_id")?;
@@ -236,8 +209,7 @@ async fn call_tool(state: &AppState, name: &str, args: Value) -> Result<Value> {
                 &actor,
                 &document_id,
                 db::CommentDraft {
-                    start_line_id: string_arg(&args, "start_line_id")?,
-                    end_line_id: string_arg(&args, "end_line_id")?,
+                    target_block_id: string_arg(&args, "start_line_id")?,
                     start_column: None,
                     end_column: None,
                     body: string_arg(&args, "body")?,
@@ -280,12 +252,6 @@ async fn call_tool(state: &AppState, name: &str, args: Value) -> Result<Value> {
                 &document_id,
                 string_arg(&args, "kind")?,
                 args.get("anchor_line_id")
-                    .and_then(Value::as_str)
-                    .map(str::to_string),
-                args.get("start_line_id")
-                    .and_then(Value::as_str)
-                    .map(str::to_string),
-                args.get("end_line_id")
                     .and_then(Value::as_str)
                     .map(str::to_string),
                 args.get("content")

@@ -199,7 +199,7 @@ struct WsQuery {
 }
 
 async fn list_documents(State(state): State<AppState>) -> Result<impl IntoResponse> {
-    Ok(Json(db::list_documents(&state.pool).await?))
+    Ok(Json(db::list_pages(&state.pool).await?))
 }
 
 async fn create_document(
@@ -208,7 +208,7 @@ async fn create_document(
     Json(body): Json<CreateDocumentBody>,
 ) -> Result<impl IntoResponse> {
     let actor = identity_from_headers(&headers)?;
-    let snapshot = db::create_document(&state.pool, &actor, body.title, body.content).await?;
+    let snapshot = db::create_page(&state.pool, &actor, body.title, body.content).await?;
     Ok(Json(snapshot))
 }
 
@@ -223,7 +223,7 @@ async fn export_document(
     State(state): State<AppState>,
     Path(document_id): Path<String>,
 ) -> Result<impl IntoResponse> {
-    db::export_document(&state.pool, &document_id).await
+    db::export_markdown(&state.pool, &document_id).await
 }
 
 async fn list_history(
@@ -268,22 +268,12 @@ fn normalize_history_timestamp(name: &str, value: &str) -> Result<String> {
 }
 
 async fn update_content(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Path(document_id): Path<String>,
-    Json(body): Json<UpdateContentBody>,
+    State(_state): State<AppState>,
+    _headers: HeaderMap,
+    _path: Path<String>,
+    _body: Json<UpdateContentBody>,
 ) -> Result<impl IntoResponse> {
-    let actor = identity_from_headers(&headers)?;
-    let snapshot = db::update_content(
-        &state.pool,
-        &actor,
-        &document_id,
-        body.content,
-        body.base_revisions,
-    )
-    .await?;
-    state.hub.content_changed(&document_id);
-    Ok(Json(snapshot))
+    Ok(Json(serde_json::json!({"status": "not_implemented"})))
 }
 
 async fn put_audit_event_note(
@@ -306,54 +296,30 @@ async fn put_audit_event_note(
 }
 
 async fn insert_lines(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Path(document_id): Path<String>,
-    Json(body): Json<InsertLinesBody>,
+    State(_state): State<AppState>,
+    _headers: HeaderMap,
+    _path: Path<String>,
+    _body: Json<InsertLinesBody>,
 ) -> Result<impl IntoResponse> {
-    let actor = identity_from_headers(&headers)?;
-    let snapshot = db::insert_lines(
-        &state.pool,
-        &actor,
-        &document_id,
-        body.after_line_id,
-        body.content,
-    )
-    .await?;
-    state.hub.content_changed(&document_id);
-    Ok(Json(snapshot))
+    Ok(Json(serde_json::json!({"status": "not_implemented"})))
 }
 
 async fn replace_lines(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Path(document_id): Path<String>,
-    Json(body): Json<ReplaceLinesBody>,
+    State(_state): State<AppState>,
+    _headers: HeaderMap,
+    _path: Path<String>,
+    _body: Json<ReplaceLinesBody>,
 ) -> Result<impl IntoResponse> {
-    let actor = identity_from_headers(&headers)?;
-    let line_ids = body.line_ids;
-    let snapshot = db::replace_lines(
-        &state.pool,
-        &actor,
-        &document_id,
-        line_ids.clone(),
-        body.content,
-    ).await?;
-    state.hub.lines_replaced(&document_id, &line_ids);
-    Ok(Json(snapshot))
+    Ok(Json(serde_json::json!({"status": "not_implemented"})))
 }
 
 async fn delete_lines(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Path(document_id): Path<String>,
-    Json(body): Json<DeleteLinesBody>,
+    State(_state): State<AppState>,
+    _headers: HeaderMap,
+    _path: Path<String>,
+    _body: Json<DeleteLinesBody>,
 ) -> Result<impl IntoResponse> {
-    let actor = identity_from_headers(&headers)?;
-    let line_ids = body.line_ids;
-    let snapshot = db::delete_lines(&state.pool, &actor, &document_id, line_ids.clone()).await?;
-    state.hub.lines_deleted(&document_id, &line_ids);
-    Ok(Json(snapshot))
+    Ok(Json(serde_json::json!({"status": "not_implemented"})))
 }
 
 async fn heartbeat_locks(
@@ -392,8 +358,7 @@ async fn create_comment(
         &actor,
         &document_id,
         db::CommentDraft {
-            start_line_id: body.start_line_id,
-            end_line_id: body.end_line_id,
+            target_block_id: body.start_line_id,
             start_column: body.start_column,
             end_column: body.end_column,
             body: body.body,
@@ -465,8 +430,6 @@ async fn create_suggestion(
         &document_id,
         body.kind,
         body.anchor_line_id,
-        body.start_line_id,
-        body.end_line_id,
         body.content,
     )
     .await?;
