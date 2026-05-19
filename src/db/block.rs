@@ -221,50 +221,21 @@ pub async fn update_block(
 
     let timestamp = now();
 
-    let mut updated = false;
+    let mut qb = sqlx::QueryBuilder::new("UPDATE blocks SET ");
+    let mut separated = qb.separated(", ");
     if let Some(bt) = block_type {
-        sqlx::query(
-            "UPDATE blocks SET block_type = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND deleted = 0",
-        )
-        .bind(bt)
-        .bind(&timestamp)
-        .bind(block_id)
-        .execute(&mut *tx)
-        .await?;
-        updated = true;
+        separated.push("block_type = ").push_bind_unseparated(bt);
     }
     if let Some(cj) = content_json {
-        sqlx::query(
-            "UPDATE blocks SET content_json = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND deleted = 0",
-        )
-        .bind(cj)
-        .bind(&timestamp)
-        .bind(block_id)
-        .execute(&mut *tx)
-        .await?;
-        updated = true;
+        separated.push("content_json = ").push_bind_unseparated(cj);
     }
     if let Some(pj) = properties_json {
-        sqlx::query(
-            "UPDATE blocks SET properties_json = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND deleted = 0",
-        )
-        .bind(pj)
-        .bind(&timestamp)
-        .bind(block_id)
-        .execute(&mut *tx)
-        .await?;
-        updated = true;
+        separated.push("properties_json = ").push_bind_unseparated(pj);
     }
-
-    if !updated {
-        sqlx::query(
-            "UPDATE blocks SET revision = revision + 1, updated_at = ? WHERE id = ? AND deleted = 0",
-        )
-        .bind(&timestamp)
-        .bind(block_id)
-        .execute(&mut *tx)
-        .await?;
-    }
+    separated.push("revision = revision + 1");
+    separated.push("updated_at = ").push_bind_unseparated(&timestamp);
+    qb.push(" WHERE id = ").push_bind(block_id).push(" AND deleted = 0");
+    qb.build().execute(&mut *tx).await?;
 
     touch_page_tx(&mut tx, &page_id).await?;
     audit_tx(
