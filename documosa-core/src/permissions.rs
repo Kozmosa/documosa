@@ -2,11 +2,11 @@ use crate::identity::RoleMode;
 
 /// Operations available to Writer role.
 pub const WRITER_OPS: &[&str] = &[
-    "create_document",
-    "insert_lines",
-    "replace_lines",
-    "delete_lines",
-    "lock_lines",
+    "create_page",
+    "insert_blocks",
+    "replace_blocks",
+    "delete_blocks",
+    "lock_blocks",
     "heartbeat_locks",
     "release_locks",
     "create_comment",
@@ -19,12 +19,12 @@ pub const WRITER_OPS: &[&str] = &[
     "view_history",
     "history_diff",
     "set_audit_note",
-    "export_document",
+    "export_page",
 ];
 
 /// Operations available to Reviewer role.
 pub const REVIEWER_OPS: &[&str] = &[
-    "create_document",
+    "create_page",
     "create_comment",
     "reply_comment",
     "update_comment",
@@ -33,7 +33,7 @@ pub const REVIEWER_OPS: &[&str] = &[
     "view_history",
     "history_diff",
     "set_audit_note",
-    "export_document",
+    "export_page",
 ];
 
 /// Check whether a role is allowed to perform an operation.

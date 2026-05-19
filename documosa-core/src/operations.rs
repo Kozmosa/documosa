@@ -8,80 +8,80 @@ use crate::models::*;
 /// Implementations (e.g. SQLite-backed server) fulfill this trait.
 #[allow(async_fn_in_trait)]
 pub trait DocumosaOps {
-    // ── document ──
+    // ── page ──
 
-    async fn create_document(
+    async fn create_page(
         &self,
         actor: &Identity,
         title: String,
         content: String,
-    ) -> Result<DocumentSnapshot, crate::error::ProtocolError>;
+    ) -> Result<PageSnapshot, crate::error::ProtocolError>;
 
-    async fn list_documents(&self) -> Result<Vec<Document>, crate::error::ProtocolError>;
+    async fn list_pages(&self) -> Result<Vec<Page>, crate::error::ProtocolError>;
 
-    async fn get_document(
+    async fn get_page(
         &self,
-        document_id: &str,
-    ) -> Result<DocumentSnapshot, crate::error::ProtocolError>;
+        page_id: &str,
+    ) -> Result<PageSnapshot, crate::error::ProtocolError>;
 
-    async fn export_document(&self, document_id: &str)
+    async fn export_page(&self, page_id: &str)
         -> Result<String, crate::error::ProtocolError>;
 
     async fn update_title(
         &self,
         actor: &Identity,
-        document_id: &str,
+        page_id: &str,
         title: &str,
     ) -> Result<(), crate::error::ProtocolError>;
 
-    // ── lines ──
+    // ── blocks ──
 
-    async fn insert_lines(
+    async fn insert_blocks(
         &self,
         actor: &Identity,
-        document_id: &str,
-        anchor_line_id: Option<&str>,
-        lines: Vec<String>,
-    ) -> Result<Vec<Line>, crate::error::ProtocolError>;
+        page_id: &str,
+        anchor_block_id: Option<&str>,
+        blocks: Vec<String>,
+    ) -> Result<Vec<Block>, crate::error::ProtocolError>;
 
-    async fn replace_lines(
+    async fn replace_blocks(
         &self,
         actor: &Identity,
-        document_id: &str,
-        line_ids: Vec<&str>,
+        page_id: &str,
+        block_ids: Vec<&str>,
         new_contents: Vec<String>,
         base_revisions: Vec<BaseRevision>,
-    ) -> Result<Vec<Line>, crate::error::ProtocolError>;
+    ) -> Result<Vec<Block>, crate::error::ProtocolError>;
 
-    async fn delete_lines(
+    async fn delete_blocks(
         &self,
         actor: &Identity,
-        document_id: &str,
-        line_ids: Vec<&str>,
-    ) -> Result<Vec<Line>, crate::error::ProtocolError>;
+        page_id: &str,
+        block_ids: Vec<&str>,
+    ) -> Result<Vec<Block>, crate::error::ProtocolError>;
 
     // ── locks ──
 
-    async fn lock_lines(
+    async fn lock_blocks(
         &self,
         actor: &Identity,
-        document_id: &str,
-        line_ids: Vec<&str>,
+        page_id: &str,
+        block_ids: Vec<&str>,
         ttl_seconds: i64,
-    ) -> Result<Vec<LineLock>, crate::error::ProtocolError>;
+    ) -> Result<Vec<BlockLock>, crate::error::ProtocolError>;
 
     async fn heartbeat_locks(
         &self,
         actor: &Identity,
-        document_id: &str,
-        line_ids: Vec<&str>,
-    ) -> Result<Vec<LineLock>, crate::error::ProtocolError>;
+        page_id: &str,
+        block_ids: Vec<&str>,
+    ) -> Result<Vec<BlockLock>, crate::error::ProtocolError>;
 
     async fn release_locks(
         &self,
         actor: &Identity,
-        document_id: &str,
-        line_ids: Vec<&str>,
+        page_id: &str,
+        block_ids: Vec<&str>,
     ) -> Result<(), crate::error::ProtocolError>;
 
     // ── comments ──
@@ -89,9 +89,8 @@ pub trait DocumosaOps {
     async fn create_comment(
         &self,
         actor: &Identity,
-        document_id: &str,
-        start_line_id: &str,
-        end_line_id: &str,
+        page_id: &str,
+        target_block_id: &str,
         start_column: Option<i64>,
         end_column: Option<i64>,
         body: &str,
@@ -100,7 +99,7 @@ pub trait DocumosaOps {
     async fn reply_comment(
         &self,
         actor: &Identity,
-        document_id: &str,
+        page_id: &str,
         comment_id: &str,
         body: &str,
     ) -> Result<CommentReply, crate::error::ProtocolError>;
@@ -108,7 +107,7 @@ pub trait DocumosaOps {
     async fn update_comment(
         &self,
         actor: &Identity,
-        document_id: &str,
+        page_id: &str,
         comment_id: &str,
         body: &str,
     ) -> Result<Comment, crate::error::ProtocolError>;
@@ -116,7 +115,7 @@ pub trait DocumosaOps {
     async fn resolve_comment(
         &self,
         actor: &Identity,
-        document_id: &str,
+        page_id: &str,
         comment_id: &str,
     ) -> Result<Comment, crate::error::ProtocolError>;
 
@@ -125,11 +124,9 @@ pub trait DocumosaOps {
     async fn create_suggestion(
         &self,
         actor: &Identity,
-        document_id: &str,
+        page_id: &str,
         kind: SuggestionKind,
-        anchor_line_id: Option<&str>,
-        start_line_id: Option<&str>,
-        end_line_id: Option<&str>,
+        target_block_id: Option<&str>,
         new_content: &str,
         base_revisions: Vec<BaseRevision>,
     ) -> Result<Suggestion, crate::error::ProtocolError>;
@@ -137,14 +134,14 @@ pub trait DocumosaOps {
     async fn accept_suggestion(
         &self,
         actor: &Identity,
-        document_id: &str,
+        page_id: &str,
         suggestion_id: &str,
     ) -> Result<Suggestion, crate::error::ProtocolError>;
 
     async fn reject_suggestion(
         &self,
         actor: &Identity,
-        document_id: &str,
+        page_id: &str,
         suggestion_id: &str,
     ) -> Result<Suggestion, crate::error::ProtocolError>;
 
@@ -152,7 +149,7 @@ pub trait DocumosaOps {
 
     async fn list_history(
         &self,
-        document_id: &str,
+        page_id: &str,
         category: HistoryCategory,
         from: Option<&str>,
         to: Option<&str>,
@@ -161,7 +158,7 @@ pub trait DocumosaOps {
 
     async fn history_diff(
         &self,
-        document_id: &str,
+        page_id: &str,
         from_event_id: &str,
         to_event_id: &str,
     ) -> Result<HistoryDiff, crate::error::ProtocolError>;
@@ -169,7 +166,7 @@ pub trait DocumosaOps {
     async fn set_audit_note(
         &self,
         actor: &Identity,
-        document_id: &str,
+        page_id: &str,
         audit_event_id: &str,
         body: &str,
     ) -> Result<(), crate::error::ProtocolError>;
@@ -178,7 +175,7 @@ pub trait DocumosaOps {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SuggestionKind {
-    InsertLines,
-    ReplaceLines,
-    DeleteLines,
+    InsertBlocks,
+    ReplaceBlocks,
+    DeleteBlocks,
 }

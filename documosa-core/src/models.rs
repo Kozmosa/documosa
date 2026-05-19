@@ -12,20 +12,24 @@ pub fn new_id() -> String {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
-pub struct Document {
+pub struct Page {
     pub id: String,
     pub title: String,
+    pub properties_json: String,
     pub created_at: String,
     pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
-pub struct Line {
+pub struct Block {
     pub id: String,
-    pub document_id: String,
-    pub order_index: i64,
-    pub content: String,
+    pub page_id: String,
+    pub parent_id: Option<String>,
+    pub order_index: f64,
+    pub block_type: String,
+    pub content_json: String,
+    pub properties_json: String,
     pub revision: i64,
     pub deleted: bool,
     pub created_at: String,
@@ -34,9 +38,9 @@ pub struct Line {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
-pub struct LineLock {
-    pub line_id: String,
-    pub document_id: String,
+pub struct BlockLock {
+    pub block_id: String,
+    pub page_id: String,
     pub owner_client_id: String,
     pub owner_nickname: String,
     pub expires_at: String,
@@ -46,9 +50,8 @@ pub struct LineLock {
 #[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
 pub struct Comment {
     pub id: String,
-    pub document_id: String,
-    pub start_line_id: String,
-    pub end_line_id: String,
+    pub page_id: String,
+    pub target_block_id: String,
     pub start_column: Option<i64>,
     pub end_column: Option<i64>,
     pub author_client_id: String,
@@ -76,11 +79,10 @@ pub struct CommentReply {
 #[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
 pub struct Suggestion {
     pub id: String,
-    pub document_id: String,
+    pub page_id: String,
     pub kind: String,
-    pub anchor_line_id: Option<String>,
-    pub start_line_id: Option<String>,
-    pub end_line_id: Option<String>,
+    pub target_block_id: Option<String>,
+    pub parent_id: Option<String>,
     pub content_json: String,
     pub base_revisions_json: String,
     pub state: String,
@@ -97,7 +99,7 @@ pub struct Suggestion {
 #[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
 pub struct AuditEvent {
     pub id: String,
-    pub document_id: String,
+    pub page_id: String,
     pub actor_client_id: String,
     pub actor_nickname: String,
     pub role_mode: String,
@@ -130,7 +132,8 @@ impl HistoryCategory {
             "suggestion" => Ok(Self::Suggestion),
             "system" => Ok(Self::System),
             _ => Err(crate::error::ProtocolError::BadRequest(
-                "history category must be document-comment, all, content, comment, suggestion, or system".into(),
+                "history category must be document-comment, all, content, comment, suggestion, or system"
+                    .into(),
             )),
         }
     }
@@ -145,13 +148,13 @@ pub struct HistoryListOptions {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DocumentSnapshot {
-    pub document: Document,
-    pub lines: Vec<Line>,
+pub struct PageSnapshot {
+    pub page: Page,
+    pub blocks: Vec<Block>,
     pub comments: Vec<Comment>,
     pub replies: Vec<CommentReply>,
     pub suggestions: Vec<Suggestion>,
-    pub locks: Vec<LineLock>,
+    pub locks: Vec<BlockLock>,
     pub audit_events: Vec<AuditEvent>,
 }
 
@@ -165,6 +168,6 @@ pub struct HistoryDiff {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BaseRevision {
-    pub line_id: String,
+    pub block_id: String,
     pub revision: i64,
 }
