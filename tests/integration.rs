@@ -2622,6 +2622,78 @@ async fn mmdash_identity_derived_from_token() {
     assert_eq!(audit_event.role_mode, "writer");
 }
 
+#[tokio::test]
+async fn users_list_and_get_work() {
+    ensure_jwt_secret();
+    let pool = pool().await;
+    let app = documosa::build_app(pool, PathBuf::from("missing")).await;
+    let token = mmdash_token("test-user", Some("Alice"));
+
+    let response = app.clone().oneshot(
+        Request::builder().method("GET").uri("/v1/users")
+            .header("Authorization", format!("Bearer {token}"))
+            .body(Body::empty()).unwrap()
+    ).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["object"], "list");
+    assert_eq!(body["results"].as_array().unwrap().len(), 2);
+    assert!(body["next_cursor"].is_null());
+
+    let user_id = body["results"][0]["id"].as_str().unwrap();
+    let response = app.clone().oneshot(
+        Request::builder().method("GET").uri(&format!("/v1/users/{user_id}"))
+            .header("Authorization", format!("Bearer {token}"))
+            .body(Body::empty()).unwrap()
+    ).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app.oneshot(
+        Request::builder().method("GET").uri("/v1/users/nonexistent")
+            .header("Authorization", format!("Bearer {token}"))
+            .body(Body::empty()).unwrap()
+    ).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn search_finds_pages_and_blocks() {
+    ensure_jwt_secret();
+    let pool = pool().await;
+    let app = documosa::build_app(pool.clone(), PathBuf::from("missing")).await;
+    let token = mmdash_token("test-user", Some("Searcher"));
+    let writer = actor("writer", RoleMode::Writer);
+
+    let rt = rich_text_json("UniqueKeyword42");
+    let snap = documosa::db::create_page(&pool, &writer, rt, String::new()).await.unwrap();
+    let page_id = snap.page.id;
+
+    let response = app.clone().oneshot(
+        Request::builder().method("POST").uri("/v1/search")
+            .header("Content-Type", "application/json")
+            .header("Authorization", format!("Bearer {token}"))
+            .body(Body::from(json!({"query":"UniqueKeyword42","filter":{"property":"object","value":"page"}}).to_string())).unwrap()
+    ).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    let results = body["results"].as_array().unwrap();
+    assert!(results.iter().any(|r| r["id"] == page_id), "should find matching page");
+
+    let bid = documosa::db::append_blocks(&pool, &writer, &page_id, vec![block_input("SearchTarget99")], None).await.unwrap()[0].id.clone();
+    let response = app.oneshot(
+        Request::builder().method("POST").uri("/v1/search")
+            .header("Content-Type", "application/json")
+            .header("Authorization", format!("Bearer {token}"))
+            .body(Body::from(json!({"query":"SearchTarget99","filter":{"property":"object","value":"block"}}).to_string())).unwrap()
+    ).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    assert!(body["results"].as_array().unwrap().iter().any(|r| r["id"] == bid), "should find matching block");
+}
+
 // ─── Helper for history API calls ───
 
 async fn get_json_auth(app: axum::Router, uri: &str, token: &str) -> Value {

@@ -5,6 +5,8 @@ mod suggestions;
 mod history;
 mod export;
 mod ws;
+mod users;
+mod search;
 
 use axum::Router;
 use axum::http::{HeaderName, HeaderValue};
@@ -39,6 +41,8 @@ pub fn router() -> Router<AppState> {
         .merge(history::router())
         .merge(export::router())
         .merge(ws::router())
+        .merge(users::router())
+        .merge(search::router())
         .layer(SetResponseHeaderLayer::if_not_present(
             HeaderName::from_static("notion-version"),
             HeaderValue::from_static("2022-06-28"),
