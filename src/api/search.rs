@@ -22,7 +22,6 @@ struct SearchRequest {
 
 #[derive(Deserialize)]
 struct SearchFilter {
-    property: Option<String>,
     value: Option<String>,
 }
 

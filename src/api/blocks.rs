@@ -1,6 +1,6 @@
 use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
-use axum::routing::{get, patch};
+use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde::{Deserialize, Serialize};
@@ -17,6 +17,8 @@ pub fn router() -> Router<AppState> {
         .route("/blocks/{block_id}", get(get_block).patch(update_block).delete(delete_block))
         .route("/blocks/{block_id}/children", get(list_children))
         .route("/pages/{page_id}/children", patch(append_blocks))
+        .route("/blocks/{block_id}/locks/heartbeat", post(lock_heartbeat))
+        .route("/blocks/{block_id}/locks/release", post(lock_release))
 }
 
 async fn get_block(
@@ -149,6 +151,45 @@ async fn append_blocks(
     let mut map = serde_json::Map::new();
     map.insert("object".into(), serde_json::json!("list"));
     map.insert("results".into(), serde_json::to_value(blocks)?);
+    map.insert("next_cursor".into(), serde_json::Value::Null);
+    map.insert("has_more".into(), serde_json::json!(false));
+    Ok(Json(serde_json::Value::Object(map)))
+}
+
+#[derive(Deserialize)]
+struct LockBody {
+    block_ids: Vec<String>,
+}
+
+async fn lock_heartbeat(
+    State(state): State<AppState>,
+    MmdashIdentity(actor): MmdashIdentity,
+    Path(block_id): Path<String>,
+    Json(body): Json<LockBody>,
+) -> Result<impl IntoResponse> {
+    let block = db::get_block(&state.pool, &block_id).await?;
+    let locks = db::heartbeat_locks(&state.pool, &actor, &block.page_id, body.block_ids).await?;
+    state.hub.locks_changed(&block.page_id);
+    let mut map = serde_json::Map::new();
+    map.insert("object".into(), serde_json::json!("list"));
+    map.insert("results".into(), serde_json::to_value(locks)?);
+    map.insert("next_cursor".into(), serde_json::Value::Null);
+    map.insert("has_more".into(), serde_json::json!(false));
+    Ok(Json(serde_json::Value::Object(map)))
+}
+
+async fn lock_release(
+    State(state): State<AppState>,
+    MmdashIdentity(actor): MmdashIdentity,
+    Path(block_id): Path<String>,
+    Json(body): Json<LockBody>,
+) -> Result<impl IntoResponse> {
+    let block = db::get_block(&state.pool, &block_id).await?;
+    let locks = db::release_locks(&state.pool, &actor, &block.page_id, body.block_ids).await?;
+    state.hub.locks_changed(&block.page_id);
+    let mut map = serde_json::Map::new();
+    map.insert("object".into(), serde_json::json!("list"));
+    map.insert("results".into(), serde_json::to_value(locks)?);
     map.insert("next_cursor".into(), serde_json::Value::Null);
     map.insert("has_more".into(), serde_json::json!(false));
     Ok(Json(serde_json::Value::Object(map)))
