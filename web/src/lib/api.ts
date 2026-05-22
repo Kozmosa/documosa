@@ -6,12 +6,25 @@ interface RequestOptions {
   token?: string
 }
 
+function nativeIdentityHeaders(): Record<string, string> {
+  const clientId = localStorage.getItem('documosa.client_id')
+  const nickname = localStorage.getItem('documosa.nickname')
+  const roleMode = localStorage.getItem('documosa.role_mode')
+
+  return {
+    ...(clientId ? { 'X-Documosa-Client-Id': clientId } : {}),
+    ...(nickname ? { 'X-Documosa-Nickname': nickname } : {}),
+    ...(roleMode ? { 'X-Documosa-Role-Mode': roleMode } : {}),
+  }
+}
+
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const token = options.token || localStorage.getItem('documosa.jwt') || ''
   const response = await fetch(`${BASE}${path}`, {
     method: options.method || 'GET',
     headers: {
       'Content-Type': 'application/json',
+      ...nativeIdentityHeaders(),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     ...(options.body ? { body: JSON.stringify(options.body) } : {}),
@@ -22,8 +35,8 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
 // Page API
 export const api = {
-  listPages: () => request<Page[]>('/v1/pages'),
-  createPage: (title: string) => request<PageSnapshot>('/v1/pages', { method: 'POST', body: { title } }),
+  listPages: async () => (await request<{ results: Page[] }>('/v1/pages')).results,
+  createPage: (title: string) => request<Page>('/v1/pages', { method: 'POST', body: { title } }),
   getPage: (id: string) => request<Page>('/v1/pages/' + id),
   updatePage: (id: string, title: string) => request<Page>('/v1/pages/' + id, { method: 'PATCH', body: { title } }),
   getSnapshot: (id: string) => request<PageSnapshot>('/v1/pages/' + id + '/snapshot'),

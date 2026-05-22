@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::Executor;
 use sqlx::SqlitePool;
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use std::str::FromStr;
 use std::time::Duration as StdDuration;
 
@@ -97,10 +97,8 @@ pub async fn migrate(pool: &SqlitePool) -> Result<()> {
         .fetch_one(pool)
         .await?;
         if has_title_json.0 == 0 {
-            pool.execute(
-                "ALTER TABLE pages ADD COLUMN title_json TEXT NOT NULL DEFAULT '[]'",
-            )
-            .await?;
+            pool.execute("ALTER TABLE pages ADD COLUMN title_json TEXT NOT NULL DEFAULT '[]'")
+                .await?;
             let rows: Vec<(String, String)> =
                 sqlx::query_as("SELECT id, title FROM pages WHERE title != ''")
                     .fetch_all(pool)
@@ -118,6 +116,36 @@ pub async fn migrate(pool: &SqlitePool) -> Result<()> {
                     .await?;
             }
         }
+    }
+
+    let has_audit_document_id: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM pragma_table_info('audit_events') WHERE name = 'document_id'",
+    )
+    .fetch_one(pool)
+    .await?;
+    let has_audit_page_id: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM pragma_table_info('audit_events') WHERE name = 'page_id'",
+    )
+    .fetch_one(pool)
+    .await?;
+    if has_audit_document_id.0 > 0 && has_audit_page_id.0 == 0 {
+        pool.execute("ALTER TABLE audit_events RENAME COLUMN document_id TO page_id")
+            .await?;
+    }
+
+    let has_note_document_id: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM pragma_table_info('audit_event_notes') WHERE name = 'document_id'",
+    )
+    .fetch_one(pool)
+    .await?;
+    let has_note_page_id: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM pragma_table_info('audit_event_notes') WHERE name = 'page_id'",
+    )
+    .fetch_one(pool)
+    .await?;
+    if has_note_document_id.0 > 0 && has_note_page_id.0 == 0 {
+        pool.execute("ALTER TABLE audit_event_notes RENAME COLUMN document_id TO page_id")
+            .await?;
     }
 
     Ok(())
