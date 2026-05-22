@@ -1,0 +1,279 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Download, FileUp, RotateCcw } from 'lucide-react'
+
+import TiptapEditor from '@/TiptapEditor'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { blocksToMarkdown, markdownToBlocks } from '@/lib/simpleEditorApi'
+import type { DocumosaBlock } from '@/lib/converter'
+
+const DRAFT_KEY = 'documosa.simple_editor.draft'
+const DEFAULT_FILENAME = 'documosa-simple-editor.md'
+const AUTOSAVE_DELAY_MS = 500
+
+type SimpleEditorDraft = {
+  filename: string
+  blocks: DocumosaBlock[]
+  updatedAt: string
+}
+
+function emptyDraft(): SimpleEditorDraft {
+  return {
+    filename: DEFAULT_FILENAME,
+    blocks: [],
+    updatedAt: new Date().toISOString(),
+  }
+}
+
+function isValidBlock(value: unknown): value is DocumosaBlock {
+  if (!value || typeof value !== 'object') return false
+  const block = value as Partial<DocumosaBlock>
+  return typeof block.block_type === 'string' && typeof block.content_json === 'string'
+}
+
+function normalizeDraft(value: unknown): SimpleEditorDraft | null {
+  if (!value || typeof value !== 'object') return null
+  const draft = value as Partial<SimpleEditorDraft>
+  if (!Array.isArray(draft.blocks) || !draft.blocks.every(isValidBlock)) return null
+
+  return {
+    filename: typeof draft.filename === 'string' && draft.filename.trim() ? draft.filename : DEFAULT_FILENAME,
+    blocks: draft.blocks,
+    updatedAt: typeof draft.updatedAt === 'string' && !Number.isNaN(new Date(draft.updatedAt).getTime())
+      ? draft.updatedAt
+      : new Date().toISOString(),
+  }
+}
+
+function loadDraft(): SimpleEditorDraft {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY)
+    if (!raw) return emptyDraft()
+    return normalizeDraft(JSON.parse(raw)) ?? emptyDraft()
+  } catch {
+    return emptyDraft()
+  }
+}
+
+function hasContent(blocks: DocumosaBlock[]) {
+  return blocks.some((block) => {
+    if (block.block_type === 'divider') return true
+
+    try {
+      const tokens = JSON.parse(block.content_json) as unknown
+      if (!Array.isArray(tokens)) return false
+      return tokens.some((token) => {
+        if (!token || typeof token !== 'object') return false
+        const plainText = (token as { plain_text?: unknown }).plain_text
+        return typeof plainText === 'string' && plainText.trim().length > 0
+      })
+    } catch {
+      return false
+    }
+  })
+}
+
+function saveDraft(draft: SimpleEditorDraft) {
+  localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
+}
+
+function formatSavedAt(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Not saved yet'
+  return `Saved ${date.toLocaleString()}`
+}
+
+function downloadText(filename: string, text: string) {
+  const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' })
+  const href = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = href
+  anchor.download = filename.trim() || DEFAULT_FILENAME
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(href)
+}
+
+export default function SimpleEditorPage() {
+  const [draft, setDraft] = useState<SimpleEditorDraft>(() => loadDraft())
+  const [error, setError] = useState('')
+  const [saveError, setSaveError] = useState('')
+  const [isConverting, setIsConverting] = useState(false)
+  const [hasPendingSave, setHasPendingSave] = useState(false)
+  const saveTimer = useRef<number | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  const savedLabel = useMemo(() => {
+    if (saveError) return saveError
+    if (hasPendingSave) return 'Saving...'
+    return formatSavedAt(draft.updatedAt)
+  }, [draft.updatedAt, hasPendingSave, saveError])
+
+  useEffect(() => {
+    return () => {
+      if (saveTimer.current !== null) window.clearTimeout(saveTimer.current)
+    }
+  }, [])
+
+  const persistDraft = useCallback((nextDraft: SimpleEditorDraft) => {
+    try {
+      saveDraft(nextDraft)
+      setSaveError('')
+    } catch {
+      setSaveError('Auto-save unavailable')
+    } finally {
+      setHasPendingSave(false)
+    }
+  }, [])
+
+  const updateDraft = useCallback((updater: (current: SimpleEditorDraft) => SimpleEditorDraft, immediate = false) => {
+    setDraft((current) => {
+      const next = updater(current)
+      if (saveTimer.current !== null) window.clearTimeout(saveTimer.current)
+      if (immediate) {
+        persistDraft(next)
+      } else {
+        setHasPendingSave(true)
+        saveTimer.current = window.setTimeout(() => persistDraft(next), AUTOSAVE_DELAY_MS)
+      }
+      return next
+    })
+  }, [persistDraft])
+
+  const handleEditorChange = useCallback((blocks: DocumosaBlock[]) => {
+    updateDraft((current) => ({
+      ...current,
+      blocks,
+      updatedAt: new Date().toISOString(),
+    }))
+  }, [updateDraft])
+
+  const handleFilenameChange = useCallback((filename: string) => {
+    updateDraft((current) => ({
+      ...current,
+      filename,
+      updatedAt: new Date().toISOString(),
+    }))
+  }, [updateDraft])
+
+  const handleUploadClick = useCallback(() => {
+    fileInputRef.current?.click()
+  }, [])
+
+  async function uploadFile(file: File) {
+    if (hasContent(draft.blocks) && !window.confirm('Uploading will replace the current local draft. Continue?')) {
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      return
+    }
+
+    setError('')
+    setIsConverting(true)
+    try {
+      const markdown = await file.text()
+      const blocks = await markdownToBlocks(markdown)
+      const nextDraft = {
+        filename: file.name || DEFAULT_FILENAME,
+        blocks,
+        updatedAt: new Date().toISOString(),
+      }
+      if (saveTimer.current !== null) window.clearTimeout(saveTimer.current)
+      setDraft(nextDraft)
+      persistDraft(nextDraft)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setIsConverting(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  async function downloadDraft() {
+    setError('')
+    setIsConverting(true)
+    try {
+      const markdown = await blocksToMarkdown(draft.blocks)
+      downloadText(draft.filename || DEFAULT_FILENAME, markdown)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setIsConverting(false)
+    }
+  }
+
+  function clearDraft() {
+    if (hasContent(draft.blocks) && !window.confirm('Clear the current local draft?')) return
+
+    const nextDraft = emptyDraft()
+    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current)
+    setDraft(nextDraft)
+    setHasPendingSave(false)
+    setError('')
+    setSaveError('')
+
+    try {
+      localStorage.removeItem(DRAFT_KEY)
+    } catch {
+      setSaveError('Auto-save unavailable')
+    }
+  }
+
+  return (
+    <main className="min-h-screen bg-background text-foreground flex flex-col">
+      <header className="border-b bg-card px-5 py-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h1 className="text-xl font-semibold">Simple Markdown Editor</h1>
+          <p className="text-sm text-muted-foreground">Upload, edit, auto-save locally, and download Markdown.</p>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Input
+            value={draft.filename}
+            onChange={(event) => handleFilenameChange(event.target.value)}
+            aria-label="Filename"
+            className="sm:w-64"
+          />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".md,.markdown,text/markdown,text/plain"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              if (file) void uploadFile(file)
+            }}
+          />
+          <Button type="button" variant="outline" disabled={isConverting} onClick={handleUploadClick}>
+            <FileUp className="h-4 w-4 mr-1.5" />
+            Upload
+          </Button>
+          <Button type="button" disabled={isConverting} onClick={() => void downloadDraft()}>
+            <Download className="h-4 w-4 mr-1.5" />
+            Download
+          </Button>
+          <Button type="button" variant="outline" disabled={isConverting} onClick={clearDraft}>
+            <RotateCcw className="h-4 w-4 mr-1.5" />
+            Clear
+          </Button>
+        </div>
+      </header>
+
+      <section className="border-b px-5 py-2 text-xs text-muted-foreground flex items-center justify-between gap-3">
+        <span>{savedLabel}</span>
+        {isConverting ? <span>Converting...</span> : null}
+      </section>
+
+      {error ? (
+        <Alert variant="destructive" className="m-5 mb-0">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      <section className="flex-1 min-h-0 p-5 overflow-auto">
+        <div className="min-h-[70vh] rounded-lg border bg-card px-5 py-4">
+          <TiptapEditor blocks={draft.blocks} readOnly={false} onChange={handleEditorChange} />
+        </div>
+      </section>
+    </main>
+  )
+}
