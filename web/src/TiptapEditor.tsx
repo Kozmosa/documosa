@@ -47,7 +47,7 @@ export default function TiptapEditor({ blocks, readOnly, onChange, onSelectionCh
   })
 
   useEffect(() => {
-    if (!editor) return
+    if (!editor || editor.isDestroyed) return
 
     const nextBlocksJson = JSON.stringify(blocks)
     if (lastEmittedBlocksJson.current === nextBlocksJson) return
@@ -55,7 +55,7 @@ export default function TiptapEditor({ blocks, readOnly, onChange, onSelectionCh
     const currentJson = JSON.stringify(editor.getJSON())
     const nextDoc = blocksToProseMirrorDoc(blocks)
     const nextJson = JSON.stringify(nextDoc)
-    if (currentJson !== nextJson) {
+    if (currentJson !== nextJson && !editor.isDestroyed) {
       editor.commands.setContent(nextDoc, { emitUpdate: false })
     }
     lastEmittedBlocksJson.current = null
