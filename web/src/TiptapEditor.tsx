@@ -44,12 +44,13 @@ export default function TiptapEditor({ blocks, readOnly, onChange, onSelectionCh
   })
 
   useEffect(() => {
-    if (editor && blocks.length > 0) {
-      const currentJson = JSON.stringify(editor.getJSON())
-      const newJson = JSON.stringify(blocksToProseMirrorDoc(blocks))
-      if (currentJson !== newJson) {
-        editor.commands.setContent(blocksToProseMirrorDoc(blocks))
-      }
+    if (!editor) return
+
+    const currentJson = JSON.stringify(editor.getJSON())
+    const nextDoc = blocksToProseMirrorDoc(blocks)
+    const nextJson = JSON.stringify(nextDoc)
+    if (currentJson !== nextJson) {
+      editor.commands.setContent(nextDoc)
     }
   }, [editor, blocks])
 
