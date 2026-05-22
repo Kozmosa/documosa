@@ -86,6 +86,8 @@ function proseMirrorNodeContentToRichText(node: JSONContent): RichTextToken[] {
   return node.content?.flatMap(proseMirrorTextToRichText) || []
 }
 
+const EQUATION_CODE_BLOCK_LANGUAGE = 'math'
+
 // Block type -> ProseMirror node type
 const BLOCK_TYPE_MAP: Record<string, string> = {
   'paragraph': 'paragraph',
@@ -95,6 +97,7 @@ const BLOCK_TYPE_MAP: Record<string, string> = {
   'bulleted_list_item': 'listItem',
   'numbered_list_item': 'listItem',
   'code': 'codeBlock',
+  'equation': 'codeBlock',
   'quote': 'blockquote',
   'divider': 'horizontalRule',
   'to_do': 'taskItem',
@@ -118,9 +121,13 @@ export function blockToProseMirror(block: DocumosaBlock): JSONContent {
     return nodeWithInlineText('heading', richTextPlainText(tokens), { level })
   }
 
-  if (block.block_type === 'code') {
+  if (block.block_type === 'code' || block.block_type === 'equation') {
     let lang: string | undefined
-    try { lang = JSON.parse(block.properties_json || '{}').language } catch { /* ignore */ }
+    if (block.block_type === 'equation') {
+      lang = EQUATION_CODE_BLOCK_LANGUAGE
+    } else {
+      try { lang = JSON.parse(block.properties_json || '{}').language } catch { /* ignore */ }
+    }
     return nodeWithInlineText('codeBlock', richTextPlainText(tokens), { language: lang })
   }
 
@@ -160,8 +167,13 @@ export function proseMirrorNodeToBlock(node: JSONContent): DocumosaBlock {
     const level = (node.attrs as Record<string, number>)?.level || 1
     blockType = `heading_${level}`
   } else if (node.type === 'codeBlock') {
-    blockType = 'code'
-    props.language = (node.attrs as { language?: string })?.language || 'plain text'
+    const language = (node.attrs as { language?: string })?.language
+    if (language === EQUATION_CODE_BLOCK_LANGUAGE) {
+      blockType = 'equation'
+    } else {
+      blockType = 'code'
+      props.language = language || 'plain text'
+    }
   } else {
     blockType = nodeTypeToBlock[node.type || ''] || 'paragraph'
   }

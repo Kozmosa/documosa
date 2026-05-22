@@ -19,7 +19,6 @@ export default function TiptapEditor({ blocks, readOnly, onChange, onSelectionCh
     extensions: [
       StarterKit.configure({
         heading: { levels: [1, 2, 3] },
-        codeBlock: false,
       }),
       Placeholder.configure({ placeholder: 'Type / for commands...' }),
     ],
