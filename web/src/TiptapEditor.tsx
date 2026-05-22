@@ -1,7 +1,7 @@
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { blocksToProseMirrorDoc, proseMirrorToBlocks } from '@/lib/converter'
 import type { DocumosaBlock } from '@/lib/converter'
 
@@ -13,6 +13,8 @@ interface TiptapEditorProps {
 }
 
 export default function TiptapEditor({ blocks, readOnly, onChange, onSelectionChange }: TiptapEditorProps) {
+  const lastEmittedBlocksJson = useRef<string | null>(null)
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -26,6 +28,7 @@ export default function TiptapEditor({ blocks, readOnly, onChange, onSelectionCh
     onUpdate: ({ editor }) => {
       const doc = editor.getJSON()
       const newBlocks = proseMirrorToBlocks(doc)
+      lastEmittedBlocksJson.current = JSON.stringify(newBlocks)
       const text = editor.getText()
       onChange(newBlocks, text)
     },
@@ -46,12 +49,16 @@ export default function TiptapEditor({ blocks, readOnly, onChange, onSelectionCh
   useEffect(() => {
     if (!editor) return
 
+    const nextBlocksJson = JSON.stringify(blocks)
+    if (lastEmittedBlocksJson.current === nextBlocksJson) return
+
     const currentJson = JSON.stringify(editor.getJSON())
     const nextDoc = blocksToProseMirrorDoc(blocks)
     const nextJson = JSON.stringify(nextDoc)
     if (currentJson !== nextJson) {
-      editor.commands.setContent(nextDoc)
+      editor.commands.setContent(nextDoc, { emitUpdate: false })
     }
+    lastEmittedBlocksJson.current = null
   }, [editor, blocks])
 
   return (
