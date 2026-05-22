@@ -41,15 +41,30 @@ function marksToAnnotations(marks?: { type: string; attrs?: Record<string, unkno
   return annotations
 }
 
+function richTextPlainText(tokens: RichTextToken[]): string {
+  return tokens.map(t => t.plain_text).join('')
+}
+
+function textToProseMirrorInlineContent(text: string): JSONContent[] | undefined {
+  if (!text) return undefined
+  return [{ type: 'text', text }]
+}
+
+function nodeWithInlineText(type: string, text: string, attrs?: Record<string, unknown>): JSONContent {
+  const content = textToProseMirrorInlineContent(text)
+  return content ? { type, attrs, content } : { type, attrs }
+}
+
 // ProseMirror JSON -> RichText token
 function proseMirrorTextToRichText(node: JSONContent): RichTextToken[] {
   if (node.type === 'text') {
+    if (!node.text) return []
     const href = node.marks?.find(m => m.type === 'link')?.attrs?.href as string | null
     return [{
       type: 'text',
-      text: { content: node.text || '', link: href ? { type: 'url', url: href } : null },
+      text: { content: node.text, link: href ? { type: 'url', url: href } : null },
       annotations: marksToAnnotations(node.marks?.filter(m => m.type !== 'link') as { type: string; attrs?: Record<string, unknown> }[]),
-      plain_text: node.text || '',
+      plain_text: node.text,
       href,
     }]
   }
@@ -60,6 +75,15 @@ function proseMirrorTextToRichText(node: JSONContent): RichTextToken[] {
     return node.content.flatMap(proseMirrorTextToRichText)
   }
   return []
+}
+
+function proseMirrorNodeContentToRichText(node: JSONContent): RichTextToken[] {
+  if (node.type === 'listItem') {
+    const paragraph = node.content?.find(child => child.type === 'paragraph')
+    return paragraph?.content?.flatMap(proseMirrorTextToRichText) || []
+  }
+
+  return node.content?.flatMap(proseMirrorTextToRichText) || []
 }
 
 // Block type -> ProseMirror node type
@@ -91,13 +115,13 @@ export function blockToProseMirror(block: DocumosaBlock): JSONContent {
 
   if (block.block_type.startsWith('heading_')) {
     const level = HEADING_LEVEL[block.block_type] || 1
-    return { type: 'heading', attrs: { level }, content: [{ type: 'text', text: tokens.map(t => t.plain_text).join('') }] }
+    return nodeWithInlineText('heading', richTextPlainText(tokens), { level })
   }
 
   if (block.block_type === 'code') {
     let lang: string | undefined
     try { lang = JSON.parse(block.properties_json || '{}').language } catch { /* ignore */ }
-    return { type: 'codeBlock', attrs: { language: lang }, content: [{ type: 'text', text: tokens.map(t => t.plain_text).join('') }] }
+    return nodeWithInlineText('codeBlock', richTextPlainText(tokens), { language: lang })
   }
 
   if (block.block_type === 'bulleted_list_item' || block.block_type === 'numbered_list_item') {
@@ -105,7 +129,7 @@ export function blockToProseMirror(block: DocumosaBlock): JSONContent {
   }
 
   const pmType = BLOCK_TYPE_MAP[block.block_type] || 'paragraph'
-  return { type: pmType, content: [{ type: 'text', text: tokens.map(t => t.plain_text).join('') }] }
+  return nodeWithInlineText(pmType, richTextPlainText(tokens))
 }
 
 function listItemBlockToProseMirror(block: DocumosaBlock): JSONContent {
@@ -113,19 +137,13 @@ function listItemBlockToProseMirror(block: DocumosaBlock): JSONContent {
   try { tokens = JSON.parse(block.content_json) } catch { /* empty */ }
   return {
     type: 'listItem',
-    content: [{ type: 'paragraph', content: [{ type: 'text', text: tokens.map(t => t.plain_text).join('') }] }],
+    content: [nodeWithInlineText('paragraph', richTextPlainText(tokens))],
   }
 }
 
 // ProseMirror JSON node -> Documosa Block
 export function proseMirrorNodeToBlock(node: JSONContent): DocumosaBlock {
-  const tokens: RichTextToken[] = []
-
-  if (node.content) {
-    for (const child of node.content) {
-      tokens.push(...proseMirrorTextToRichText(child))
-    }
-  }
+  const tokens = proseMirrorNodeContentToRichText(node)
 
   const nodeTypeToBlock: Record<string, string> = {
     'paragraph': 'paragraph',
