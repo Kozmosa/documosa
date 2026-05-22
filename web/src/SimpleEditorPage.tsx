@@ -103,6 +103,7 @@ export default function SimpleEditorPage() {
   const [isConverting, setIsConverting] = useState(false)
   const [hasPendingSave, setHasPendingSave] = useState(false)
   const saveTimer = useRef<number | null>(null)
+  const pendingDraft = useRef<SimpleEditorDraft | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const savedLabel = useMemo(() => {
@@ -111,15 +112,45 @@ export default function SimpleEditorPage() {
     return formatSavedAt(draft.updatedAt)
   }, [draft.updatedAt, hasPendingSave, saveError])
 
-  useEffect(() => {
-    return () => {
-      if (saveTimer.current !== null) window.clearTimeout(saveTimer.current)
+  const flushPendingDraft = useCallback(() => {
+    if (saveTimer.current !== null) {
+      window.clearTimeout(saveTimer.current)
+      saveTimer.current = null
+    }
+
+    if (!pendingDraft.current) return
+
+    try {
+      saveDraft(pendingDraft.current)
+      pendingDraft.current = null
+      setSaveError('')
+    } catch {
+      setSaveError('Auto-save unavailable')
+    } finally {
+      setHasPendingSave(false)
     }
   }, [])
+
+  useEffect(() => {
+    const handleBeforeUnload = () => flushPendingDraft()
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flushPendingDraft()
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      flushPendingDraft()
+    }
+  }, [flushPendingDraft])
 
   const persistDraft = useCallback((nextDraft: SimpleEditorDraft) => {
     try {
       saveDraft(nextDraft)
+      pendingDraft.current = null
       setSaveError('')
     } catch {
       setSaveError('Auto-save unavailable')
@@ -133,8 +164,10 @@ export default function SimpleEditorPage() {
       const next = updater(current)
       if (saveTimer.current !== null) window.clearTimeout(saveTimer.current)
       if (immediate) {
+        pendingDraft.current = null
         persistDraft(next)
       } else {
+        pendingDraft.current = next
         setHasPendingSave(true)
         saveTimer.current = window.setTimeout(() => persistDraft(next), AUTOSAVE_DELAY_MS)
       }
@@ -178,7 +211,11 @@ export default function SimpleEditorPage() {
         blocks,
         updatedAt: new Date().toISOString(),
       }
-      if (saveTimer.current !== null) window.clearTimeout(saveTimer.current)
+      if (saveTimer.current !== null) {
+        window.clearTimeout(saveTimer.current)
+        saveTimer.current = null
+      }
+      pendingDraft.current = null
       setDraft(nextDraft)
       persistDraft(nextDraft)
     } catch (error) {
@@ -206,7 +243,11 @@ export default function SimpleEditorPage() {
     if (hasContent(draft.blocks) && !window.confirm('Clear the current local draft?')) return
 
     const nextDraft = emptyDraft()
-    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current)
+    if (saveTimer.current !== null) {
+      window.clearTimeout(saveTimer.current)
+      saveTimer.current = null
+    }
+    pendingDraft.current = null
     setDraft(nextDraft)
     setHasPendingSave(false)
     setError('')
@@ -271,7 +312,12 @@ export default function SimpleEditorPage() {
 
       <section className="flex-1 min-h-0 p-5 overflow-auto">
         <div className="min-h-[70vh] rounded-lg border bg-card px-5 py-4">
-          <TiptapEditor blocks={draft.blocks} readOnly={false} onChange={handleEditorChange} />
+          <TiptapEditor
+            key={isConverting ? 'read-only' : 'editable'}
+            blocks={draft.blocks}
+            readOnly={isConverting}
+            onChange={handleEditorChange}
+          />
         </div>
       </section>
     </main>
