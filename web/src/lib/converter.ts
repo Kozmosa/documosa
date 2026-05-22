@@ -56,6 +56,9 @@ function proseMirrorTextToRichText(node: JSONContent): RichTextToken[] {
   if (node.type === 'hardBreak') {
     return [{ type: 'text', text: { content: '\n' }, annotations: marksToAnnotations(), plain_text: '\n' }]
   }
+  if (node.content) {
+    return node.content.flatMap(proseMirrorTextToRichText)
+  }
   return []
 }
 
@@ -97,8 +100,21 @@ export function blockToProseMirror(block: DocumosaBlock): JSONContent {
     return { type: 'codeBlock', attrs: { language: lang }, content: [{ type: 'text', text: tokens.map(t => t.plain_text).join('') }] }
   }
 
+  if (block.block_type === 'bulleted_list_item' || block.block_type === 'numbered_list_item') {
+    return listItemBlockToProseMirror(block)
+  }
+
   const pmType = BLOCK_TYPE_MAP[block.block_type] || 'paragraph'
   return { type: pmType, content: [{ type: 'text', text: tokens.map(t => t.plain_text).join('') }] }
+}
+
+function listItemBlockToProseMirror(block: DocumosaBlock): JSONContent {
+  let tokens: RichTextToken[] = []
+  try { tokens = JSON.parse(block.content_json) } catch { /* empty */ }
+  return {
+    type: 'listItem',
+    content: [{ type: 'paragraph', content: [{ type: 'text', text: tokens.map(t => t.plain_text).join('') }] }],
+  }
 }
 
 // ProseMirror JSON node -> Documosa Block
@@ -164,9 +180,41 @@ export function proseMirrorToBlocks(doc: JSONContent): DocumosaBlock[] {
 
 // Convert flat blocks to ProseMirror document
 export function blocksToProseMirrorDoc(blocks: DocumosaBlock[]): JSONContent {
-  const content: JSONContent[] = blocks
-    .filter(b => !b.id || b.block_type !== 'divider')
-    .map(blockToProseMirror)
+  const content: JSONContent[] = []
+  let pendingList: JSONContent | null = null
+  let pendingListType: 'bulletList' | 'orderedList' | null = null
+
+  const flushList = () => {
+    if (pendingList) {
+      content.push(pendingList)
+      pendingList = null
+      pendingListType = null
+    }
+  }
+
+  for (const block of blocks.filter(b => !b.id || b.block_type !== 'divider')) {
+    const listType = block.block_type === 'bulleted_list_item'
+      ? 'bulletList'
+      : block.block_type === 'numbered_list_item'
+        ? 'orderedList'
+        : null
+
+    if (!listType) {
+      flushList()
+      content.push(blockToProseMirror(block))
+      continue
+    }
+
+    if (pendingListType !== listType) {
+      flushList()
+      pendingList = { type: listType, content: [] }
+      pendingListType = listType
+    }
+
+    pendingList?.content?.push(listItemBlockToProseMirror(block))
+  }
+
+  flushList()
   return { type: 'doc', content }
 }
 
