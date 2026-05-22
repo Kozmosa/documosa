@@ -4,12 +4,13 @@ pub mod db;
 pub mod diff;
 pub mod error;
 pub mod mcp;
-pub mod models;
 pub mod mmdash_api;
 pub mod mmdash_auth;
 pub mod mmdash_blocks;
+pub mod models;
 pub mod notion;
 pub mod realtime;
+pub mod simple_editor;
 pub mod static_files;
 
 use std::path::PathBuf;
@@ -39,6 +40,7 @@ pub async fn build_app(pool: SqlitePool, web_dir: PathBuf) -> Router {
 
     api::router()
         .merge(mcp::router())
+        .merge(simple_editor::router())
         .fallback(static_files::serve)
         .with_state(state)
         .layer(CorsLayer::permissive())

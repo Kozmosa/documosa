@@ -2433,6 +2433,99 @@ async fn float_renumber_test() {
     assert_eq!(texts[50], "mid-50");
 }
 
+// ─── simple editor conversion tests ───────────────────────────────────
+
+#[tokio::test]
+async fn simple_editor_md2blocks_converts_markdown_without_auth() {
+    let pool = pool().await;
+    let app = documosa::build_app(pool, PathBuf::from("missing")).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/simple/editor/md2blocks")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "markdown": "# Title\n\n- Item" }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    let blocks = body["blocks"].as_array().unwrap();
+
+    assert_eq!(blocks.len(), 2);
+    assert_eq!(blocks[0]["block_type"], "heading_1");
+    let heading_content: Value =
+        serde_json::from_str(blocks[0]["content_json"].as_str().unwrap()).unwrap();
+    assert_eq!(heading_content[0]["plain_text"], "Title");
+
+    assert_eq!(blocks[1]["block_type"], "bulleted_list_item");
+    let bullet_content: Value =
+        serde_json::from_str(blocks[1]["content_json"].as_str().unwrap()).unwrap();
+    assert_eq!(bullet_content[0]["plain_text"], "Item");
+}
+
+#[tokio::test]
+async fn simple_editor_blocks2md_converts_blocks_without_auth() {
+    let pool = pool().await;
+    let app = documosa::build_app(pool, PathBuf::from("missing")).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/simple/editor/blocks2md")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "blocks": [
+                            {
+                                "block_type": "heading_1",
+                                "content_json": rich_text_json("Title")
+                            },
+                            {
+                                "block_type": "paragraph",
+                                "content_json": rich_text_json("Body")
+                            }
+                        ]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["markdown"], "# Title\nBody");
+}
+
+#[tokio::test]
+async fn simple_editor_md2blocks_rejects_malformed_json() {
+    let pool = pool().await;
+    let app = documosa::build_app(pool, PathBuf::from("missing")).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/simple/editor/md2blocks")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
 // ─── mmdash adapter integration tests ───────────────────────────────
 
 #[tokio::test]
