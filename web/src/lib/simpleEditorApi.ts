@@ -11,10 +11,12 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   return response.json() as Promise<T>
 }
 
-export function markdownToBlocks(markdown: string): Promise<DocumosaBlock[]> {
-  return postJson<DocumosaBlock[]>('/simple/editor/md2blocks', { markdown })
+export async function markdownToBlocks(markdown: string): Promise<DocumosaBlock[]> {
+  const response = await postJson<{ blocks: DocumosaBlock[] }>('/simple/editor/md2blocks', { markdown })
+  return response.blocks
 }
 
-export function blocksToMarkdown(blocks: DocumosaBlock[]): Promise<string> {
-  return postJson<string>('/simple/editor/blocks2md', { blocks })
+export async function blocksToMarkdown(blocks: DocumosaBlock[]): Promise<string> {
+  const response = await postJson<{ markdown: string }>('/simple/editor/blocks2md', { blocks })
+  return response.markdown
 }
