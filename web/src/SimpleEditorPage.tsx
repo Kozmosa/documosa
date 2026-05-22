@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Download, FileUp, RotateCcw } from 'lucide-react'
 
-import TiptapEditor from '@/TiptapEditor'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { blocksToMarkdown, markdownToBlocks } from '@/lib/simpleEditorApi'
 import type { DocumosaBlock } from '@/lib/converter'
+
+const TiptapEditor = React.lazy(() => import('@/TiptapEditor'))
 
 const DRAFT_KEY = 'documosa.simple_editor.draft'
 const DEFAULT_FILENAME = 'documosa-simple-editor.md'
@@ -312,12 +313,14 @@ export default function SimpleEditorPage() {
 
       <section className="flex-1 min-h-0 p-5 overflow-auto">
         <div className="min-h-[70vh] rounded-lg border bg-card px-5 py-4">
-          <TiptapEditor
-            key={isConverting ? 'read-only' : 'editable'}
-            blocks={draft.blocks}
-            readOnly={isConverting}
-            onChange={handleEditorChange}
-          />
+          <Suspense fallback={<div className="text-sm text-muted-foreground">Loading editor...</div>}>
+            <TiptapEditor
+              key={isConverting ? 'read-only' : 'editable'}
+              blocks={draft.blocks}
+              readOnly={isConverting}
+              onChange={handleEditorChange}
+            />
+          </Suspense>
         </div>
       </section>
     </main>
