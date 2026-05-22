@@ -1,9 +1,26 @@
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
+import CodeBlock from '@tiptap/extension-code-block'
 import Placeholder from '@tiptap/extension-placeholder'
 import { useEffect, useRef } from 'react'
 import { blocksToProseMirrorDoc, proseMirrorToBlocks } from '@/lib/converter'
 import type { DocumosaBlock } from '@/lib/converter'
+
+const DocumosaCodeBlock = CodeBlock.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      documosaBlockType: {
+        default: null,
+        parseHTML: element => element.getAttribute('data-documosa-block-type'),
+        renderHTML: attributes => {
+          if (!attributes.documosaBlockType) return {}
+          return { 'data-documosa-block-type': attributes.documosaBlockType }
+        },
+      },
+    }
+  },
+})
 
 interface TiptapEditorProps {
   blocks: DocumosaBlock[]
@@ -19,7 +36,9 @@ export default function TiptapEditor({ blocks, readOnly, onChange, onSelectionCh
     extensions: [
       StarterKit.configure({
         heading: { levels: [1, 2, 3] },
+        codeBlock: false,
       }),
+      DocumosaCodeBlock,
       Placeholder.configure({ placeholder: 'Type / for commands...' }),
     ],
     content: blocksToProseMirrorDoc(blocks),
