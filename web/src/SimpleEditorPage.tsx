@@ -262,67 +262,103 @@ export default function SimpleEditorPage() {
   }
 
   return (
-    <main className="min-h-screen bg-background text-foreground flex flex-col">
-      <header className="border-b bg-card px-5 py-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">Simple Markdown Editor</h1>
-          <p className="text-sm text-muted-foreground">Upload, edit, auto-save locally, and download Markdown.</p>
+    <main
+      data-testid="simple-editor-shell"
+      className="min-h-screen flex flex-col items-center relative"
+      style={{ backgroundColor: '#ece9e0' }}
+    >
+      <div className="absolute inset-0 pointer-events-none overflow-hidden" aria-hidden="true">
+        <div
+          className="absolute top-[-15%] left-[-5%] w-[55%] h-[55%] rounded-full"
+          style={{ background: 'radial-gradient(circle, rgba(217,119,87,0.05) 0%, transparent 70%)' }}
+        />
+        <div
+          className="absolute bottom-[-10%] right-[-5%] w-[45%] h-[45%] rounded-full"
+          style={{ background: 'radial-gradient(circle, rgba(160,140,120,0.07) 0%, transparent 70%)' }}
+        />
+      </div>
+
+      <div className="w-full max-w-3xl px-4 sm:px-6 lg:px-8 pt-10 sm:pt-14 pb-8 relative z-10">
+        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2 mb-8">
+          <div>
+            <p className="text-xs uppercase tracking-[0.15em] text-stone-400 font-medium mb-2">Documosa</p>
+            <h1 className="text-3xl sm:text-4xl font-serif font-normal text-stone-800 leading-tight">
+              Simple Markdown Editor
+            </h1>
+            <p className="text-sm text-stone-500 mt-2 max-w-md">
+              A quiet local draft space for quick Markdown edits.
+            </p>
+          </div>
+          <span className="text-xs text-stone-400 whitespace-nowrap">{savedLabel}</span>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Input
-            value={draft.filename}
-            onChange={(event) => handleFilenameChange(event.target.value)}
-            aria-label="Filename"
-            className="sm:w-64"
-          />
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".md,.markdown,text/markdown,text/plain"
-            className="hidden"
-            onChange={(event) => {
-              const file = event.target.files?.[0]
-              if (file) void uploadFile(file)
-            }}
-          />
-          <Button type="button" variant="outline" disabled={isConverting} onClick={handleUploadClick}>
-            <FileUp className="h-4 w-4 mr-1.5" />
-            Upload
-          </Button>
-          <Button type="button" disabled={isConverting} onClick={() => void downloadDraft()}>
-            <Download className="h-4 w-4 mr-1.5" />
-            Download
-          </Button>
-          <Button type="button" variant="outline" disabled={isConverting} onClick={clearDraft}>
-            <RotateCcw className="h-4 w-4 mr-1.5" />
-            Clear
-          </Button>
-        </div>
-      </header>
 
-      <section className="border-b px-5 py-2 text-xs text-muted-foreground flex items-center justify-between gap-3">
-        <span>{savedLabel}</span>
-        {isConverting ? <span>Converting...</span> : null}
-      </section>
+        {error ? (
+          <Alert variant="destructive" className="mb-4">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
 
-      {error ? (
-        <Alert variant="destructive" className="m-5 mb-0">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      ) : null}
-
-      <section className="flex-1 min-h-0 p-5 overflow-auto">
-        <div className="min-h-[70vh] rounded-lg border bg-card px-5 py-4">
-          <Suspense fallback={<div className="text-sm text-muted-foreground">Loading editor...</div>}>
-            <TiptapEditor
-              key={isConverting ? 'read-only' : 'editable'}
-              blocks={draft.blocks}
-              readOnly={isConverting}
-              onChange={handleEditorChange}
+        <div
+          data-testid="simple-editor-paper"
+          className="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden"
+        >
+          <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b border-stone-100 bg-stone-50/50">
+            <Input
+              value={draft.filename}
+              onChange={(event) => handleFilenameChange(event.target.value)}
+              aria-label="Filename"
+              className="flex-1 min-w-0 sm:max-w-xs"
             />
-          </Suspense>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".md,.markdown,text/markdown,text/plain"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                if (file) void uploadFile(file)
+              }}
+            />
+            <Button type="button" variant="outline" disabled={isConverting} onClick={handleUploadClick}>
+              <FileUp className="h-4 w-4 mr-1.5" />
+              Upload
+            </Button>
+            <Button
+              type="button"
+              disabled={isConverting}
+              onClick={() => void downloadDraft()}
+              style={{ backgroundColor: '#d97757', borderColor: '#d97757' }}
+            >
+              <Download className="h-4 w-4 mr-1.5" />
+              Download
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={isConverting}
+              onClick={clearDraft}
+              style={{ color: '#c0453a' }}
+            >
+              <RotateCcw className="h-4 w-4 mr-1.5" />
+              Clear
+            </Button>
+            {isConverting ? (
+              <span className="text-xs text-stone-400">Converting…</span>
+            ) : null}
+          </div>
+
+          <div data-testid="simple-editor-writing-surface" className="px-6 py-5">
+            <Suspense fallback={<div className="text-sm text-stone-400">Loading editor…</div>}>
+              <TiptapEditor
+                key={isConverting ? 'read-only' : 'editable'}
+                blocks={draft.blocks}
+                readOnly={isConverting}
+                onChange={handleEditorChange}
+              />
+            </Suspense>
+          </div>
         </div>
-      </section>
+      </div>
     </main>
   )
 }

@@ -39,7 +39,7 @@ export default function TiptapEditor({ blocks, readOnly, onChange, onSelectionCh
         codeBlock: false,
       }),
       DocumosaCodeBlock,
-      Placeholder.configure({ placeholder: 'Type / for commands...' }),
+      Placeholder.configure({ placeholder: 'Paste or start writing Markdown…' }),
     ],
     content: blocksToProseMirrorDoc(blocks),
     editable: !readOnly,
@@ -87,51 +87,89 @@ export default function TiptapEditor({ blocks, readOnly, onChange, onSelectionCh
           outline: none;
           min-height: 200px;
           padding: 0.5rem 0;
+          font-family: Georgia, "Times New Roman", ui-serif, serif;
+          font-size: 1.05rem;
+          line-height: 1.75;
+          color: #3d3929;
         }
         .tiptap-editor .ProseMirror p.is-editor-empty:first-child::before {
-          color: #adb5bd;
+          color: #b8b0a0;
           content: attr(data-placeholder);
           float: left;
           height: 0;
           pointer-events: none;
+          font-family: Inter, ui-sans-serif, system-ui, sans-serif;
         }
-        .tiptap-editor .ProseMirror h1 { font-size: 1.875rem; font-weight: 700; line-height: 1.2; margin: 1rem 0 0.25rem; }
-        .tiptap-editor .ProseMirror h2 { font-size: 1.5rem; font-weight: 600; line-height: 1.3; margin: 0.75rem 0 0.25rem; }
-        .tiptap-editor .ProseMirror h3 { font-size: 1.25rem; font-weight: 600; line-height: 1.4; margin: 0.5rem 0 0.25rem; }
-        .tiptap-editor .ProseMirror p { margin: 0.25rem 0; }
+        .tiptap-editor .ProseMirror h1 {
+          font-family: Georgia, "Times New Roman", ui-serif, serif;
+          font-size: 1.75rem;
+          font-weight: 400;
+          line-height: 1.25;
+          margin: 1.75rem 0 0.25rem;
+          color: #2d2a1d;
+          letter-spacing: -0.01em;
+        }
+        .tiptap-editor .ProseMirror h2 {
+          font-family: Georgia, "Times New Roman", ui-serif, serif;
+          font-size: 1.35rem;
+          font-weight: 400;
+          line-height: 1.3;
+          margin: 1.5rem 0 0.2rem;
+          color: #2d2a1d;
+        }
+        .tiptap-editor .ProseMirror h3 {
+          font-family: Georgia, "Times New Roman", ui-serif, serif;
+          font-size: 1.15rem;
+          font-weight: 500;
+          line-height: 1.35;
+          margin: 1.25rem 0 0.15rem;
+          color: #2d2a1d;
+        }
+        .tiptap-editor .ProseMirror p {
+          margin: 0.4rem 0;
+        }
         .tiptap-editor .ProseMirror blockquote {
-          border-left: 3px solid var(--color-border);
-          margin: 0.5rem 0;
-          padding-left: 1rem;
-          color: var(--color-muted-foreground);
+          border-left: 3px solid #d97757;
+          margin: 0.75rem 0;
+          padding: 0.25rem 0 0.25rem 1rem;
+          color: #7a7665;
+          font-style: italic;
         }
         .tiptap-editor .ProseMirror hr {
           border: none;
-          border-top: 1px solid var(--color-border);
-          margin: 1rem 0;
+          border-top: 1px solid #e0dcd0;
+          margin: 1.25rem 0;
         }
         .tiptap-editor .ProseMirror ul,
         .tiptap-editor .ProseMirror ol {
           padding-left: 1.5rem;
-          margin: 0.25rem 0;
+          margin: 0.4rem 0;
+        }
+        .tiptap-editor .ProseMirror li {
+          margin: 0.15rem 0;
         }
         .tiptap-editor .ProseMirror code {
-          background: var(--color-muted);
+          background: #f3efe6;
           border-radius: 0.25rem;
-          padding: 0.125rem 0.25rem;
+          padding: 0.125rem 0.3rem;
           font-size: 0.875em;
+          font-family: "SF Mono", "Fira Code", "Fira Mono", ui-monospace, monospace;
+          color: #8b5e3c;
         }
         .tiptap-editor .ProseMirror pre {
-          background: var(--color-muted);
-          border-radius: 0.375rem;
-          padding: 0.75rem 1rem;
-          margin: 0.5rem 0;
+          background: #f7f4ec;
+          border: 1px solid #e8e3d7;
+          border-radius: 0.5rem;
+          padding: 0.875rem 1.125rem;
+          margin: 0.75rem 0;
           overflow-x: auto;
         }
         .tiptap-editor .ProseMirror pre code {
           background: none;
           padding: 0;
           border-radius: 0;
+          color: #3d3929;
+          font-size: 0.9em;
         }
       `}</style>
     </div>
