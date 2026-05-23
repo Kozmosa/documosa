@@ -41,23 +41,53 @@ function marksToAnnotations(marks?: { type: string; attrs?: Record<string, unkno
   return annotations
 }
 
+function richTextPlainText(tokens: RichTextToken[]): string {
+  return tokens.map(t => t.plain_text).join('')
+}
+
+function textToProseMirrorInlineContent(text: string): JSONContent[] | undefined {
+  if (!text) return undefined
+  return [{ type: 'text', text }]
+}
+
+function nodeWithInlineText(type: string, text: string, attrs?: Record<string, unknown>): JSONContent {
+  const content = textToProseMirrorInlineContent(text)
+  return content ? { type, attrs, content } : { type, attrs }
+}
+
 // ProseMirror JSON -> RichText token
 function proseMirrorTextToRichText(node: JSONContent): RichTextToken[] {
   if (node.type === 'text') {
+    if (!node.text) return []
     const href = node.marks?.find(m => m.type === 'link')?.attrs?.href as string | null
     return [{
       type: 'text',
-      text: { content: node.text || '', link: href ? { type: 'url', url: href } : null },
+      text: { content: node.text, link: href ? { type: 'url', url: href } : null },
       annotations: marksToAnnotations(node.marks?.filter(m => m.type !== 'link') as { type: string; attrs?: Record<string, unknown> }[]),
-      plain_text: node.text || '',
+      plain_text: node.text,
       href,
     }]
   }
   if (node.type === 'hardBreak') {
     return [{ type: 'text', text: { content: '\n' }, annotations: marksToAnnotations(), plain_text: '\n' }]
   }
+  if (node.content) {
+    return node.content.flatMap(proseMirrorTextToRichText)
+  }
   return []
 }
+
+function proseMirrorNodeContentToRichText(node: JSONContent): RichTextToken[] {
+  if (node.type === 'listItem') {
+    const paragraph = node.content?.find(child => child.type === 'paragraph')
+    return paragraph?.content?.flatMap(proseMirrorTextToRichText) || []
+  }
+
+  return node.content?.flatMap(proseMirrorTextToRichText) || []
+}
+
+const EQUATION_CODE_BLOCK_LANGUAGE = 'math'
+const DOCUMOSA_EQUATION_BLOCK_TYPE = 'equation'
 
 // Block type -> ProseMirror node type
 const BLOCK_TYPE_MAP: Record<string, string> = {
@@ -68,6 +98,7 @@ const BLOCK_TYPE_MAP: Record<string, string> = {
   'bulleted_list_item': 'listItem',
   'numbered_list_item': 'listItem',
   'code': 'codeBlock',
+  'equation': 'codeBlock',
   'quote': 'blockquote',
   'divider': 'horizontalRule',
   'to_do': 'taskItem',
@@ -88,28 +119,42 @@ export function blockToProseMirror(block: DocumosaBlock): JSONContent {
 
   if (block.block_type.startsWith('heading_')) {
     const level = HEADING_LEVEL[block.block_type] || 1
-    return { type: 'heading', attrs: { level }, content: [{ type: 'text', text: tokens.map(t => t.plain_text).join('') }] }
+    return nodeWithInlineText('heading', richTextPlainText(tokens), { level })
   }
 
-  if (block.block_type === 'code') {
+  if (block.block_type === 'code' || block.block_type === 'equation') {
     let lang: string | undefined
-    try { lang = JSON.parse(block.properties_json || '{}').language } catch { /* ignore */ }
-    return { type: 'codeBlock', attrs: { language: lang }, content: [{ type: 'text', text: tokens.map(t => t.plain_text).join('') }] }
+    const attrs: Record<string, unknown> = {}
+    if (block.block_type === 'equation') {
+      lang = EQUATION_CODE_BLOCK_LANGUAGE
+      attrs.documosaBlockType = DOCUMOSA_EQUATION_BLOCK_TYPE
+    } else {
+      try { lang = JSON.parse(block.properties_json || '{}').language } catch { /* ignore */ }
+    }
+    attrs.language = lang
+    return nodeWithInlineText('codeBlock', richTextPlainText(tokens), attrs)
+  }
+
+  if (block.block_type === 'bulleted_list_item' || block.block_type === 'numbered_list_item') {
+    return listItemBlockToProseMirror(block)
   }
 
   const pmType = BLOCK_TYPE_MAP[block.block_type] || 'paragraph'
-  return { type: pmType, content: [{ type: 'text', text: tokens.map(t => t.plain_text).join('') }] }
+  return nodeWithInlineText(pmType, richTextPlainText(tokens))
+}
+
+function listItemBlockToProseMirror(block: DocumosaBlock): JSONContent {
+  let tokens: RichTextToken[] = []
+  try { tokens = JSON.parse(block.content_json) } catch { /* empty */ }
+  return {
+    type: 'listItem',
+    content: [nodeWithInlineText('paragraph', richTextPlainText(tokens))],
+  }
 }
 
 // ProseMirror JSON node -> Documosa Block
 export function proseMirrorNodeToBlock(node: JSONContent): DocumosaBlock {
-  const tokens: RichTextToken[] = []
-
-  if (node.content) {
-    for (const child of node.content) {
-      tokens.push(...proseMirrorTextToRichText(child))
-    }
-  }
+  const tokens = proseMirrorNodeContentToRichText(node)
 
   const nodeTypeToBlock: Record<string, string> = {
     'paragraph': 'paragraph',
@@ -126,8 +171,14 @@ export function proseMirrorNodeToBlock(node: JSONContent): DocumosaBlock {
     const level = (node.attrs as Record<string, number>)?.level || 1
     blockType = `heading_${level}`
   } else if (node.type === 'codeBlock') {
-    blockType = 'code'
-    props.language = (node.attrs as { language?: string })?.language || 'plain text'
+    const attrs = node.attrs as { language?: string; documosaBlockType?: string } | undefined
+    const language = attrs?.language
+    if (attrs?.documosaBlockType === DOCUMOSA_EQUATION_BLOCK_TYPE) {
+      blockType = 'equation'
+    } else {
+      blockType = 'code'
+      props.language = language || 'plain text'
+    }
   } else {
     blockType = nodeTypeToBlock[node.type || ''] || 'paragraph'
   }
@@ -164,9 +215,41 @@ export function proseMirrorToBlocks(doc: JSONContent): DocumosaBlock[] {
 
 // Convert flat blocks to ProseMirror document
 export function blocksToProseMirrorDoc(blocks: DocumosaBlock[]): JSONContent {
-  const content: JSONContent[] = blocks
-    .filter(b => !b.id || b.block_type !== 'divider')
-    .map(blockToProseMirror)
+  const content: JSONContent[] = []
+  let pendingList: JSONContent | null = null
+  let pendingListType: 'bulletList' | 'orderedList' | null = null
+
+  const flushList = () => {
+    if (pendingList) {
+      content.push(pendingList)
+      pendingList = null
+      pendingListType = null
+    }
+  }
+
+  for (const block of blocks.filter(b => !b.id || b.block_type !== 'divider')) {
+    const listType = block.block_type === 'bulleted_list_item'
+      ? 'bulletList'
+      : block.block_type === 'numbered_list_item'
+        ? 'orderedList'
+        : null
+
+    if (!listType) {
+      flushList()
+      content.push(blockToProseMirror(block))
+      continue
+    }
+
+    if (pendingListType !== listType) {
+      flushList()
+      pendingList = { type: listType, content: [] }
+      pendingListType = listType
+    }
+
+    pendingList?.content?.push(listItemBlockToProseMirror(block))
+  }
+
+  flushList()
   return { type: 'doc', content }
 }
 

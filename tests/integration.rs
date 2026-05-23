@@ -12,10 +12,9 @@ use axum::http::{Method, Request, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::any;
 use axum::{Json, Router};
+use documosa::db::{BlockInput, CommentDraft};
 use documosa::error::AppError;
 use documosa::models::*;
-use documosa::db::{BlockInput, CommentDraft};
-use reqwest::Client;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::sync::Mutex;
@@ -357,6 +356,115 @@ fn mmdash_token(sub: &str, name: Option<&str>) -> String {
 // ─── Tests ───
 
 #[tokio::test]
+async fn v1_create_page_allows_native_identity_without_jwt() {
+    let pool = pool().await;
+    let app = documosa::build_app(pool.clone(), PathBuf::from("missing")).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/pages")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("X-Documosa-Client-Id", "native-client-1")
+                .header("X-Documosa-Nickname", "Native User")
+                .header("X-Documosa-Role-Mode", "writer")
+                .body(Body::from(json!({"title": "Native Doc"}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    let page_id = body["id"].as_str().unwrap();
+
+    let snapshot = documosa::db::snapshot(&pool, page_id).await.unwrap();
+    let created = snapshot
+        .audit_events
+        .iter()
+        .find(|event| event.event_type == "page.created")
+        .unwrap();
+
+    assert_eq!(created.actor_client_id, "native-client-1");
+    assert_eq!(created.actor_nickname, "Native User");
+    assert_eq!(created.role_mode, "writer");
+}
+
+#[tokio::test]
+async fn mmdash_get_content_rejects_missing_jwt() {
+    ensure_jwt_secret();
+
+    let pool = pool().await;
+    let app = documosa::build_app(pool.clone(), PathBuf::from("missing")).await;
+
+    let writer = actor("writer", RoleMode::Writer);
+    let created = documosa::db::create_page(
+        &pool,
+        &writer,
+        title_json_text("Protected Doc"),
+        make_blocks_json(&["secret content"]),
+    )
+    .await
+    .unwrap();
+    let document_id = created.page.id;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/mmdash/documents/{document_id}/content"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn migrate_renames_legacy_audit_document_id_columns() {
+    let pool = documosa::db::connect_memory().await.unwrap();
+    sqlx::query("CREATE TABLE audit_events (id TEXT PRIMARY KEY, document_id TEXT NOT NULL, actor_client_id TEXT NOT NULL, actor_nickname TEXT NOT NULL, role_mode TEXT NOT NULL, event_type TEXT NOT NULL, details_json TEXT NOT NULL, created_at TEXT NOT NULL)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("CREATE TABLE audit_event_notes (audit_event_id TEXT PRIMARY KEY, document_id TEXT NOT NULL, body TEXT NOT NULL, updated_by_client_id TEXT NOT NULL, updated_by_nickname TEXT NOT NULL, updated_at TEXT NOT NULL)")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    documosa::db::migrate(&pool).await.unwrap();
+
+    let audit_page_id: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM pragma_table_info('audit_events') WHERE name = 'page_id'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let notes_page_id: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM pragma_table_info('audit_event_notes') WHERE name = 'page_id'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audit_page_id.0, 1);
+    assert_eq!(notes_page_id.0, 1);
+
+    let writer = actor("writer", RoleMode::Writer);
+    documosa::db::create_page(
+        &pool,
+        &writer,
+        title_json_text("Migrated Doc"),
+        String::new(),
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
 async fn page_blocks_locks_comments_suggestions_and_audit_work() {
     let pool = pool().await;
     let writer = actor("writer", RoleMode::Writer);
@@ -566,8 +674,13 @@ async fn inserting_blocks_without_anchor_places_blocks_at_end() {
 
     assert_eq!(block_texts(&appended), vec!["zero-a", "zero-b"]);
 
-    let snap = documosa::db::snapshot(&pool, &created.page.id).await.unwrap();
-    assert_eq!(block_texts(&snap.blocks), vec!["one", "two", "zero-a", "zero-b"]);
+    let snap = documosa::db::snapshot(&pool, &created.page.id)
+        .await
+        .unwrap();
+    assert_eq!(
+        block_texts(&snap.blocks),
+        vec!["one", "two", "zero-a", "zero-b"]
+    );
 }
 
 #[tokio::test]
@@ -597,7 +710,9 @@ async fn inserting_blocks_after_anchor_keeps_stable_order() {
 
     assert_eq!(block_texts(&appended), vec!["one-a", "one-b"]);
 
-    let snap = documosa::db::snapshot(&pool, &created.page.id).await.unwrap();
+    let snap = documosa::db::snapshot(&pool, &created.page.id)
+        .await
+        .unwrap();
     assert_eq!(
         block_texts(&snap.blocks),
         vec!["one", "one-a", "one-b", "two"]
@@ -725,15 +840,10 @@ async fn comment_audit_details_store_full_comment_bodies() {
     assert_eq!(update_details["before_body"], full_body);
     assert_eq!(update_details["after_body"], updated_body);
 
-    let replied = documosa::db::reply_comment(
-        &pool,
-        &writer,
-        &page_id,
-        &comment_id,
-        reply_body.clone(),
-    )
-    .await
-    .unwrap();
+    let replied =
+        documosa::db::reply_comment(&pool, &writer, &page_id, &comment_id, reply_body.clone())
+            .await
+            .unwrap();
     let reply_details = audit_details(&replied, "comment.replied");
     assert_eq!(reply_details["body"], reply_body);
     assert_eq!(reply_details["comment_id"], comment_id);
@@ -870,10 +980,9 @@ async fn history_diff_uses_stored_page_versions_and_conflicts_when_missing() {
         .id
         .clone();
 
-    let diff =
-        documosa::db::history_diff(&pool, &page_id, &created_event_id, &appended_event_id)
-            .await
-            .unwrap();
+    let diff = documosa::db::history_diff(&pool, &page_id, &created_event_id, &appended_event_id)
+        .await
+        .unwrap();
     assert_eq!(diff.from_content, "one");
     assert_eq!(diff.to_content, "one\ntwo");
 
@@ -919,10 +1028,9 @@ async fn history_diff_uses_stored_page_versions_and_conflicts_when_missing() {
         .execute(&pool)
         .await
         .unwrap();
-    let missing =
-        documosa::db::history_diff(&pool, &page_id, &appended_event_id, &legacy_event_id)
-            .await
-            .unwrap_err();
+    let missing = documosa::db::history_diff(&pool, &page_id, &appended_event_id, &legacy_event_id)
+        .await
+        .unwrap_err();
     assert_eq!(missing.to_string(), "version data not available");
 }
 
@@ -1077,12 +1185,7 @@ async fn history_api_lists_and_filters_events() {
             .any(|event| event["event_type"] == "locks.heartbeat")
     );
 
-    let default = get_json_auth(
-        app.clone(),
-        &format!("/v1/pages/{page_id}/history"),
-        &token,
-    )
-    .await;
+    let default = get_json_auth(app.clone(), &format!("/v1/pages/{page_id}/history"), &token).await;
     assert_eq!(default["object"], "list");
     let default_results = default["results"].as_array().unwrap();
     let default_event_types: Vec<_> = default_results
@@ -1139,9 +1242,7 @@ async fn history_api_lists_and_filters_events() {
         .replace('+', "%2B");
     let from_suggestion = get_json_auth(
         app.clone(),
-        &format!(
-            "/v1/pages/{page_id}/history?category=all&from={suggestion_time}"
-        ),
+        &format!("/v1/pages/{page_id}/history?category=all&from={suggestion_time}"),
         &token,
     )
     .await;
@@ -2193,10 +2294,7 @@ async fn lock_bypass_test() {
     )
     .await;
 
-    assert!(matches!(
-        result,
-        Err(AppError::Conflict(_))
-    ));
+    assert!(matches!(result, Err(AppError::Conflict(_))));
 }
 
 #[tokio::test]
@@ -2257,15 +2355,14 @@ async fn cascade_delete_test() {
         .unwrap();
 
     // Verify all 3 blocks are soft-deleted in DB
-    let count: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM blocks WHERE id IN (?, ?, ?) AND deleted = 0"
-    )
-    .bind(&parent_id)
-    .bind(&child_id)
-    .bind(&grandchild_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let count: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM blocks WHERE id IN (?, ?, ?) AND deleted = 0")
+            .bind(&parent_id)
+            .bind(&child_id)
+            .bind(&grandchild_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(count.0, 0, "all three blocks should be soft-deleted");
 
     // Verify snapshot returns no blocks
@@ -2308,15 +2405,9 @@ async fn float_renumber_test() {
     let blocks: Vec<BlockInput> = (1..=100)
         .map(|i| block_input(&format!("mid-{i}")))
         .collect();
-    documosa::db::append_blocks(
-        &pool,
-        &writer,
-        &page_id,
-        blocks,
-        Some(&first_id),
-    )
-    .await
-    .unwrap();
+    documosa::db::append_blocks(&pool, &writer, &page_id, blocks, Some(&first_id))
+        .await
+        .unwrap();
 
     let snap = documosa::db::snapshot(&pool, &page_id).await.unwrap();
 
@@ -2328,7 +2419,9 @@ async fn float_renumber_test() {
         assert!(
             block.order_index > prev_order,
             "block {} has order_index {} which is not > {}",
-            block.id, block.order_index, prev_order
+            block.id,
+            block.order_index,
+            prev_order
         );
         prev_order = block.order_index;
     }
@@ -2338,6 +2431,99 @@ async fn float_renumber_test() {
     assert_eq!(texts[0], "first");
     assert_eq!(texts[101], "last");
     assert_eq!(texts[50], "mid-50");
+}
+
+// ─── simple editor conversion tests ───────────────────────────────────
+
+#[tokio::test]
+async fn simple_editor_md2blocks_converts_markdown_without_auth() {
+    let pool = pool().await;
+    let app = documosa::build_app(pool, PathBuf::from("missing")).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/simple/editor/md2blocks")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "markdown": "# Title\n\n- Item" }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    let blocks = body["blocks"].as_array().unwrap();
+
+    assert_eq!(blocks.len(), 2);
+    assert_eq!(blocks[0]["block_type"], "heading_1");
+    let heading_content: Value =
+        serde_json::from_str(blocks[0]["content_json"].as_str().unwrap()).unwrap();
+    assert_eq!(heading_content[0]["plain_text"], "Title");
+
+    assert_eq!(blocks[1]["block_type"], "bulleted_list_item");
+    let bullet_content: Value =
+        serde_json::from_str(blocks[1]["content_json"].as_str().unwrap()).unwrap();
+    assert_eq!(bullet_content[0]["plain_text"], "Item");
+}
+
+#[tokio::test]
+async fn simple_editor_blocks2md_converts_blocks_without_auth() {
+    let pool = pool().await;
+    let app = documosa::build_app(pool, PathBuf::from("missing")).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/simple/editor/blocks2md")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "blocks": [
+                            {
+                                "block_type": "heading_1",
+                                "content_json": rich_text_json("Title")
+                            },
+                            {
+                                "block_type": "paragraph",
+                                "content_json": rich_text_json("Body")
+                            }
+                        ]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["markdown"], "# Title\nBody");
+}
+
+#[tokio::test]
+async fn simple_editor_md2blocks_rejects_malformed_json() {
+    let pool = pool().await;
+    let app = documosa::build_app(pool, PathBuf::from("missing")).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/simple/editor/md2blocks")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 // ─── mmdash adapter integration tests ───────────────────────────────
@@ -2436,7 +2622,14 @@ async fn mmdash_get_content_returns_blocks_and_markdown() {
         &pool,
         &writer,
         title_json_text("Blocks Doc"),
-        make_blocks_json(&["# Title", "Paragraph.", "Bullet", "Numbered", "Quote", "---"]),
+        make_blocks_json(&[
+            "# Title",
+            "Paragraph.",
+            "Bullet",
+            "Numbered",
+            "Quote",
+            "---",
+        ]),
     )
     .await
     .unwrap();
@@ -2629,11 +2822,18 @@ async fn users_list_and_get_work() {
     let app = documosa::build_app(pool, PathBuf::from("missing")).await;
     let token = mmdash_token("test-user", Some("Alice"));
 
-    let response = app.clone().oneshot(
-        Request::builder().method("GET").uri("/v1/users")
-            .header("Authorization", format!("Bearer {token}"))
-            .body(Body::empty()).unwrap()
-    ).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/users")
+                .header("Authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body: Value = serde_json::from_slice(&bytes).unwrap();
@@ -2642,18 +2842,31 @@ async fn users_list_and_get_work() {
     assert!(body["next_cursor"].is_null());
 
     let user_id = body["results"][0]["id"].as_str().unwrap();
-    let response = app.clone().oneshot(
-        Request::builder().method("GET").uri(&format!("/v1/users/{user_id}"))
-            .header("Authorization", format!("Bearer {token}"))
-            .body(Body::empty()).unwrap()
-    ).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(&format!("/v1/users/{user_id}"))
+                .header("Authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    let response = app.oneshot(
-        Request::builder().method("GET").uri("/v1/users/nonexistent")
-            .header("Authorization", format!("Bearer {token}"))
-            .body(Body::empty()).unwrap()
-    ).await.unwrap();
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/users/nonexistent")
+                .header("Authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
@@ -2666,7 +2879,9 @@ async fn search_finds_pages_and_blocks() {
     let writer = actor("writer", RoleMode::Writer);
 
     let rt = rich_text_json("UniqueKeyword42");
-    let snap = documosa::db::create_page(&pool, &writer, rt, String::new()).await.unwrap();
+    let snap = documosa::db::create_page(&pool, &writer, rt, String::new())
+        .await
+        .unwrap();
     let page_id = snap.page.id;
 
     let response = app.clone().oneshot(
@@ -2679,9 +2894,22 @@ async fn search_finds_pages_and_blocks() {
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body: Value = serde_json::from_slice(&bytes).unwrap();
     let results = body["results"].as_array().unwrap();
-    assert!(results.iter().any(|r| r["id"] == page_id), "should find matching page");
+    assert!(
+        results.iter().any(|r| r["id"] == page_id),
+        "should find matching page"
+    );
 
-    let bid = documosa::db::append_blocks(&pool, &writer, &page_id, vec![block_input("SearchTarget99")], None).await.unwrap()[0].id.clone();
+    let bid = documosa::db::append_blocks(
+        &pool,
+        &writer,
+        &page_id,
+        vec![block_input("SearchTarget99")],
+        None,
+    )
+    .await
+    .unwrap()[0]
+        .id
+        .clone();
     let response = app.oneshot(
         Request::builder().method("POST").uri("/v1/search")
             .header("Content-Type", "application/json")
@@ -2691,7 +2919,14 @@ async fn search_finds_pages_and_blocks() {
     assert_eq!(response.status(), StatusCode::OK);
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body: Value = serde_json::from_slice(&bytes).unwrap();
-    assert!(body["results"].as_array().unwrap().iter().any(|r| r["id"] == bid), "should find matching block");
+    assert!(
+        body["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["id"] == bid),
+        "should find matching block"
+    );
 }
 
 // ─── Helper for history API calls ───

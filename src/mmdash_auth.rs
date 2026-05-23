@@ -1,4 +1,5 @@
 use axum::extract::FromRequestParts;
+use axum::http::HeaderMap;
 use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
@@ -22,44 +23,89 @@ impl<S: Send + Sync> FromRequestParts<S> for MmdashIdentity {
     type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self> {
-        let header = parts
+        let strict_mmdash = is_mmdash_path(parts.uri.path());
+        let authorization = parts
             .headers
             .get(AUTHORIZATION)
-            .and_then(|value| value.to_str().ok())
-            .ok_or(AppError::Unauthorized)?;
+            .and_then(|value| value.to_str().ok());
 
-        let token = header
-            .strip_prefix("Bearer ")
-            .ok_or(AppError::Unauthorized)?;
+        if let Some(header) = authorization {
+            if let Some(token) = header.strip_prefix("Bearer ") {
+                match decode_mmdash_identity(token) {
+                    Ok(identity) => return Ok(MmdashIdentity(identity)),
+                    Err(error) if strict_mmdash => return Err(error),
+                    Err(_) => {}
+                }
+            } else if strict_mmdash {
+                return Err(AppError::Unauthorized);
+            }
+        } else if strict_mmdash {
+            return Err(AppError::Unauthorized);
+        }
 
-        let secret = std::env::var("JWT_SECRET")
-            .map_err(|_| AppError::Unauthorized)?;
-        let algorithm = std::env::var("JWT_ALGORITHM")
-            .ok()
-            .and_then(|s| parse_algorithm(&s))
-            .unwrap_or(Algorithm::HS256);
-
-        let decoding_key = DecodingKey::from_secret(secret.as_bytes());
-        let mut validation = Validation::new(algorithm);
-        validation.validate_aud = false;
-
-        let token_data = decode::<Claims>(token, &decoding_key, &validation)
-            .map_err(|_| AppError::Unauthorized)?;
-
-        let claims = token_data.claims;
-        let nickname = claims
-            .name
-            .filter(|s| !s.trim().is_empty())
-            .or(claims.email.filter(|s| !s.trim().is_empty()))
-            .unwrap_or_else(|| "mmdash-user".into());
-
-        Ok(MmdashIdentity(Identity {
-            client_id: format!("mmdash-{}", claims.sub),
-            nickname,
-            role_mode: RoleMode::Writer,
-            actor_kind: Default::default(),
-        }))
+        Ok(MmdashIdentity(native_identity(&parts.headers)?))
     }
+}
+
+fn is_mmdash_path(path: &str) -> bool {
+    path == "/api/mmdash" || path.starts_with("/api/mmdash/")
+}
+
+fn header_value(headers: &HeaderMap, name: &'static str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn native_identity(headers: &HeaderMap) -> Result<Identity> {
+    let client_id =
+        header_value(headers, "x-documosa-client-id").unwrap_or_else(|| "native-ui".to_string());
+    let nickname =
+        header_value(headers, "x-documosa-nickname").unwrap_or_else(|| "Native UI".to_string());
+    let role_mode = header_value(headers, "x-documosa-role-mode")
+        .as_deref()
+        .map(RoleMode::parse)
+        .transpose()?
+        .unwrap_or(RoleMode::Writer);
+
+    Ok(Identity {
+        client_id,
+        nickname,
+        role_mode,
+        actor_kind: Default::default(),
+    })
+}
+
+fn decode_mmdash_identity(token: &str) -> Result<Identity> {
+    let secret = std::env::var("JWT_SECRET").map_err(|_| AppError::Unauthorized)?;
+    let algorithm = std::env::var("JWT_ALGORITHM")
+        .ok()
+        .and_then(|s| parse_algorithm(&s))
+        .unwrap_or(Algorithm::HS256);
+
+    let decoding_key = DecodingKey::from_secret(secret.as_bytes());
+    let mut validation = Validation::new(algorithm);
+    validation.validate_aud = false;
+
+    let token_data =
+        decode::<Claims>(token, &decoding_key, &validation).map_err(|_| AppError::Unauthorized)?;
+
+    let claims = token_data.claims;
+    let nickname = claims
+        .name
+        .filter(|s| !s.trim().is_empty())
+        .or(claims.email.filter(|s| !s.trim().is_empty()))
+        .unwrap_or_else(|| "mmdash-user".into());
+
+    Ok(Identity {
+        client_id: format!("mmdash-{}", claims.sub),
+        nickname,
+        role_mode: RoleMode::Writer,
+        actor_kind: Default::default(),
+    })
 }
 
 fn parse_algorithm(value: &str) -> Option<Algorithm> {

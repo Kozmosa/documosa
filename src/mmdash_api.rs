@@ -11,9 +11,9 @@ use axum::extract::State;
 use crate::AppState;
 use crate::db;
 use crate::error::Result;
-use crate::models::{Identity, PageSnapshot};
 use crate::mmdash_auth::MmdashIdentity;
 use crate::mmdash_blocks::{Block, BlockType, blocks_to_markdown, markdown_to_blocks};
+use crate::models::{Identity, PageSnapshot};
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -88,6 +88,7 @@ async fn create_document(
 
 async fn get_document(
     State(state): State<AppState>,
+    MmdashIdentity(_actor): MmdashIdentity,
     Path(document_id): Path<String>,
 ) -> Result<impl IntoResponse> {
     let snap = db::snapshot(&state.pool, &document_id).await?;
@@ -102,6 +103,7 @@ async fn get_document(
 
 async fn get_content(
     State(state): State<AppState>,
+    MmdashIdentity(_actor): MmdashIdentity,
     Path(document_id): Path<String>,
 ) -> Result<impl IntoResponse> {
     let snap = db::snapshot(&state.pool, &document_id).await?;
