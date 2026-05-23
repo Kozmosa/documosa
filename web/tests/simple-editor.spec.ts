@@ -99,3 +99,51 @@ test('simple editor preserves fenced code and equation block semantics after edi
     { block_type: 'equation' },
   ])
 })
+
+test('simple editor presents the Anthropic paper writing surface', async ({ page }) => {
+  await page.route('**/simple/editor/md2blocks', async (route) => {
+    await route.fulfill({ json: { blocks: [] } })
+  })
+
+  await page.route('**/simple/editor/blocks2md', async (route) => {
+    await route.fulfill({ json: { markdown: '' } })
+  })
+
+  await page.goto('/simple/editor')
+
+  await expect(page.getByText('Documosa')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Simple Markdown Editor' })).toBeVisible()
+  await expect(page.getByText('A quiet local draft space for quick Markdown edits.')).toBeVisible()
+  await expect(page.getByTestId('simple-editor-shell')).toBeVisible()
+  await expect(page.getByTestId('simple-editor-paper')).toBeVisible()
+  await expect(page.getByTestId('simple-editor-writing-surface')).toBeVisible()
+  await expect(page.getByText(/Saved|Saving|Auto-save unavailable/)).toBeVisible()
+
+  await expect(page.locator('main')).toHaveCSS('background-color', 'rgb(236, 233, 224)')
+  await expect(page.getByRole('button', { name: 'Download' })).toHaveCSS('background-color', 'rgb(217, 119, 87)')
+  await expect(page.getByRole('button', { name: 'Clear' })).toHaveCSS('color', 'rgb(192, 69, 58)')
+})
+
+test('simple editor paper layout stays usable on a narrow viewport', async ({ page }) => {
+  await page.route('**/simple/editor/md2blocks', async (route) => {
+    await route.fulfill({ json: { blocks: [] } })
+  })
+
+  await page.route('**/simple/editor/blocks2md', async (route) => {
+    await route.fulfill({ json: { markdown: '' } })
+  })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/simple/editor')
+
+  await expect(page.getByLabel('Filename')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Upload' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Download' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Clear' })).toBeVisible()
+
+  await expect(page.evaluate(() => {
+    const scrollingElement = document.scrollingElement
+    if (!scrollingElement) return false
+    return scrollingElement.scrollWidth > window.innerWidth
+  })).resolves.toBe(false)
+})
